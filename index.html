@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WorldBox Lite — симулятор жизни</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <div id="topbar">
+    <div id="stats"></div>
+    <div id="speed-row"></div>
+    <button id="new-world-btn" title="Новый мир">🌍 Новый мир</button>
+  </div>
+
+  <div id="bottombar">
+    <div id="tool-label">Поднять землю</div>
+    <div id="brush-row"></div>
+    <div id="toolbar"></div>
+  </div>
+
+  <div id="help">
+    ЛКМ — инструмент · ПКМ/колёсико — камера · Space — пауза · 1/2/3 — скорость
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
