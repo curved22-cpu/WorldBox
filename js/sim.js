@@ -129,6 +129,9 @@ export function tickDay(game) {
   for (const s of game.settlements) tickSettlement(s, game, game.day);
   tickWars(game, game.day);
   for (const s of [...game.settlements]) maybeColonize(game, s, game.day);
+  if (game.day % 20 === 0) {
+    game.settlements = game.settlements.filter(s => livingPeople(s, game).length > 0);
+  }
   game.day++;
 }
 

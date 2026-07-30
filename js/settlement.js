@@ -106,18 +106,18 @@ export function tickSettlement(settlement, world, day) {
 
   for (const p of adults) {
     if (p.job === 'farmer') {
-      settlement.stock.food += (3 + p.stats.strength / 25) * farmBonus * railBonus;
+      settlement.stock.food += (12 + p.stats.strength / 6) * farmBonus * railBonus;
       p.skills.farming = Math.min(100, p.skills.farming + 0.03);
     } else if (p.job === 'woodcutter') {
-      settlement.stock.wood += (3 + p.stats.strength / 25) * railBonus;
+      settlement.stock.wood += (5 + p.stats.strength / 12) * railBonus;
       p.skills.woodcutting = Math.min(100, p.skills.woodcutting + 0.03);
       if (!settlement.milestones.firstTree) {
         settlement.milestones.firstTree = true;
         addEvent(world.events, day, `${p.name} срубил${p.sex === 'f' ? 'а' : ''} первое дерево поселения «${settlement.name}».`, 'milestone');
       }
     } else if (p.job === 'miner') {
-      settlement.stock.stone += (2 + p.stats.strength / 28) * mineBonus * railBonus;
-      if (settlement.era >= 5) settlement.stock.ore += (1.5 + p.stats.strength / 30) * mineBonus * refineryBonus;
+      settlement.stock.stone += (4 + p.stats.strength / 14) * mineBonus * railBonus;
+      if (settlement.era >= 5) settlement.stock.ore += (3 + p.stats.strength / 16) * mineBonus * refineryBonus;
     } else if (p.job === 'builder' && settlement.constructionQueue) {
       settlement.constructionQueue.progress += 1 + p.stats.strength / 20 + p.skills.building * 0.1;
       p.skills.building = Math.min(100, p.skills.building + 0.03);
