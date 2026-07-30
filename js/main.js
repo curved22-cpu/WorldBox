@@ -1,112 +1,75 @@
-import { World, isLand } from './world.js';
-import { Camera, Renderer, TILE } from './render.js';
-import { updateEntities, spawnEntity } from './entities.js';
-import { setupUI } from './ui.js';
+import { createGame, tickDay } from './sim.js';
+import { hasSave, loadGame, saveGame, catchUp, clearSave } from './save.js';
+import { setupOnboarding, setupGameUI } from './ui.js';
 import { setupInput } from './input.js';
+import { Camera, Renderer, TILE } from './render.js';
 import { getTool } from './tools.js';
-
-const WORLD_W = 180, WORLD_H = 110;
-const BASE_TICK_MS = 1000 / 8;
+import { MS_PER_DAY_AT_X1 } from './time.js';
+import { addEvent } from './events.js';
 
 const canvas = document.getElementById('game');
-
-function resize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-}
+function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
 window.addEventListener('resize', resize);
 resize();
 
-const world = new World(WORLD_W, WORLD_H, Date.now() % 1e9);
-const camera = new Camera(canvas);
-camera.zoom = Math.min(canvas.width / (WORLD_W * TILE), canvas.height / (WORLD_H * TILE)) * 0.95;
-camera.zoom = Math.max(0.3, Math.min(4, camera.zoom));
-camera.x = WORLD_W * TILE / 2;
-camera.y = WORLD_H * TILE / 2;
+let game = null, camera = null, renderer = null, ui = null, inputApi = null;
+let acc = 0, last = performance.now();
 
-const renderer = new Renderer(canvas, world);
-
-const state = { toolId: 'raise', brushRadius: 1, paused: false, speed: 1, hover: null };
-
-function randomLandSpot() {
-  for (let tries = 0; tries < 400; tries++) {
-    const x = Math.floor(Math.random() * world.width);
-    const y = Math.floor(Math.random() * world.height);
-    if (isLand(world.biome[world.idx(x, y)])) return { x, y };
-  }
-  return { x: Math.floor(world.width / 2), y: Math.floor(world.height / 2) };
+function applyTool(toolId, target) {
+  const tool = getTool(toolId);
+  if (tool) tool.apply(game, target);
+  ui.syncAll();
 }
 
-function seedCluster(type, count, center, spread) {
-  let placed = 0, attempts = 0;
-  while (placed < count && attempts < count * 40) {
-    attempts++;
-    const x = Math.round(center.x + (Math.random() * 2 - 1) * spread);
-    const y = Math.round(center.y + (Math.random() * 2 - 1) * spread);
-    if (world.inBounds(x, y) && isLand(world.biome[world.idx(x, y)])) {
-      if (spawnEntity(world, type, x, y, { energy: 0.9, age: Math.floor(Math.random() * 200) })) placed++;
-    }
-  }
+function newGame() {
+  clearSave();
+  location.reload();
 }
 
-function seedScattered(type, count) {
-  let placed = 0, attempts = 0;
-  while (placed < count && attempts < count * 30) {
-    attempts++;
-    const { x, y } = randomLandSpot();
-    if (spawnEntity(world, type, x, y, { energy: 0.9, age: Math.floor(Math.random() * 200) })) placed++;
-  }
+function startLoop() {
+  document.getElementById('game-ui').style.display = 'flex';
+  camera = new Camera(canvas);
+  camera.zoom = 2.2;
+  const s0 = game.settlements[0];
+  camera.x = s0.x * TILE; camera.y = s0.y * TILE;
+  renderer = new Renderer(canvas, game.terrain);
+  ui = setupGameUI(game, applyTool, newGame);
+  inputApi = setupInput(canvas, camera, game, renderer, hit => ui.selectTarget(hit));
+  document.getElementById('zoom-in-btn').addEventListener('click', () => inputApi.zoomBy(1.25));
+  document.getElementById('zoom-out-btn').addEventListener('click', () => inputApi.zoomBy(1 / 1.25));
+  last = performance.now(); acc = 0;
+  setInterval(() => { if (game) saveGame(game); }, 4000);
+  window.addEventListener('beforeunload', () => saveGame(game));
+  requestAnimationFrame(loop);
 }
-
-function seedPopulation() {
-  for (const race of ['human', 'elf', 'orc']) {
-    seedCluster(race, 14, randomLandSpot(), 5);
-  }
-  seedScattered('sheep', 26);
-  seedScattered('rabbit', 26);
-  seedScattered('cow', 10);
-  seedScattered('wolf', 6);
-  seedScattered('bear', 5);
-}
-seedPopulation();
-
-const ui = setupUI(state, world);
-setupInput(canvas, camera, world, state, ui);
-
-function zoomBy(factor) {
-  camera.zoom = Math.max(0.3, Math.min(4, camera.zoom * factor));
-  camera.clamp(world);
-}
-document.getElementById('zoom-in-btn').addEventListener('click', () => zoomBy(1.25));
-document.getElementById('zoom-out-btn').addEventListener('click', () => zoomBy(1 / 1.25));
-
-let last = performance.now();
-let acc = 0;
 
 function loop(now) {
-  const dt = Math.min(now - last, 200);
+  const dt = Math.min(now - last, 250);
   last = now;
-  if (!state.paused) {
-    const interval = BASE_TICK_MS / state.speed;
-    acc += dt;
-    let steps = 0;
-    while (acc >= interval && steps < 12) {
-      world.step();
-      updateEntities(world);
-      acc -= interval;
-      steps++;
-    }
+  if (game.speedMult > 0) {
+    acc += dt * game.speedMult;
+    let days = 0;
+    while (acc >= MS_PER_DAY_AT_X1 && days < 80) { tickDay(game); acc -= MS_PER_DAY_AT_X1; days++; }
   } else {
     acc = 0;
   }
-
-  let hover = null;
-  if (state.hover && world.inBounds(state.hover.x, state.hover.y)) {
-    const tool = getTool(state.toolId);
-    hover = { x: state.hover.x, y: state.hover.y, radius: tool && tool.brush ? state.brushRadius : 0.3 };
-  }
-  renderer.render(camera, hover);
-  ui.syncStats();
+  renderer.render(camera, game, null);
+  ui.syncAll();
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+
+if (hasSave()) {
+  game = loadGame();
+  const daysPassed = catchUp(game);
+  if (daysPassed > 5) {
+    addEvent(game.events, game.day, `Пока тебя не было, прошло примерно ${Math.round(daysPassed / 100)} лет.`, 'major');
+  }
+  saveGame(game);
+  startLoop();
+} else {
+  setupOnboarding((settlementName, f1, f2) => {
+    game = createGame(Math.floor(Math.random() * 1e9), settlementName, f1, f2);
+    saveGame(game);
+    startLoop();
+  });
+}

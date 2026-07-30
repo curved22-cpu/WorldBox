@@ -3,34 +3,34 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WorldBox Lite — симулятор жизни</title>
+  <title>Сага — симулятор жизни</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <canvas id="game"></canvas>
 
-  <div id="topbar">
-    <div id="stats"></div>
-    <div id="speed-row"></div>
-    <button id="new-world-btn" title="Новый мир">🌍 Новый мир</button>
-  </div>
+  <div id="setup-screen"></div>
 
-  <div id="bottombar">
-    <div id="tool-label">Поднять землю</div>
-    <div id="brush-row"></div>
-    <div id="toolbar"></div>
-  </div>
+  <div id="game-ui" style="display:none">
+    <div id="topbar">
+      <div id="year-display">Год 0</div>
+      <div id="pop-display">👥 0 · 🏘 0</div>
+      <div id="speed-row"></div>
+      <label id="live-toggle-label"><input type="checkbox" id="live-toggle" /> Жить без меня</label>
+      <button id="new-game-btn" title="Новая сага">🔄 Новая сага</button>
+    </div>
 
-  <div id="help">
-    ЛКМ — инструмент · ПКМ/колёсико — камера · Space — пауза · 1/2/3 — скорость
-  </div>
-  <div id="help-touch">
-    Палец — инструмент · два пальца — камера/зум · кнопки +/− справа внизу
-  </div>
+    <div id="event-feed"></div>
+    <div id="inspector" style="display:none"></div>
 
-  <div id="zoom-controls">
-    <button id="zoom-in-btn" title="Приблизить">+</button>
-    <button id="zoom-out-btn" title="Отдалить">−</button>
+    <div id="zoom-controls">
+      <button id="zoom-in-btn" title="Приблизить">+</button>
+      <button id="zoom-out-btn" title="Отдалить">−</button>
+    </div>
+
+    <div id="help">
+      ЛКМ — выбрать · ПКМ/колёсико — камера · два пальца — камера/зум на телефоне
+    </div>
   </div>
 
   <script type="module" src="js/main.js"></script>
