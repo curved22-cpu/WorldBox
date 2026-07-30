@@ -5,6 +5,35 @@ export function setupInput(canvas, camera, world, state, ui) {
   let dragButton = null;
   let lastPan = null;
   let lastApply = {};
+  const activePointers = new Map();
+  const pinch = { active: false, startDist: 1, startZoom: 1, lastMid: { x: 0, y: 0 } };
+
+  function startPinch() {
+    const pts = [...activePointers.values()];
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+    pinch.active = true;
+    pinch.startDist = dist;
+    pinch.startZoom = camera.zoom;
+    pinch.lastMid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  }
+
+  function updatePinch() {
+    const pts = [...activePointers.values()];
+    const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
+    const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+    const dx = mid.x - pinch.lastMid.x, dy = mid.y - pinch.lastMid.y;
+    camera.x -= dx / camera.zoom;
+    camera.y -= dy / camera.zoom;
+    const rect = canvas.getBoundingClientRect();
+    const sx = mid.x - rect.left, sy = mid.y - rect.top;
+    const [wxBefore, wyBefore] = camera.screenToWorld(sx, sy);
+    camera.zoom = Math.max(0.3, Math.min(4, pinch.startZoom * (dist / pinch.startDist)));
+    const [wxAfter, wyAfter] = camera.screenToWorld(sx, sy);
+    camera.x += (wxBefore - wxAfter) * TILE;
+    camera.y += (wyBefore - wyAfter) * TILE;
+    camera.clamp(world);
+    pinch.lastMid = mid;
+  }
 
   function tileUnderCursor(e) {
     const rect = canvas.getBoundingClientRect();
@@ -29,7 +58,13 @@ export function setupInput(canvas, camera, world, state, ui) {
   canvas.addEventListener('contextmenu', e => e.preventDefault());
 
   canvas.addEventListener('pointerdown', e => {
-    canvas.setPointerCapture(e.pointerId);
+    try { canvas.setPointerCapture(e.pointerId); } catch { /* not critical if unsupported */ }
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size >= 2) {
+      dragButton = null; lastPan = null;
+      startPinch();
+      return;
+    }
     const pos = tileUnderCursor(e);
     if (e.button === 2 || e.button === 1) {
       dragButton = 'pan';
@@ -41,6 +76,12 @@ export function setupInput(canvas, camera, world, state, ui) {
   });
 
   canvas.addEventListener('pointermove', e => {
+    if (activePointers.has(e.pointerId)) activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (activePointers.size >= 2) {
+      if (!pinch.active) startPinch();
+      updatePinch();
+      return;
+    }
     const pos = tileUnderCursor(e);
     state.hover = pos;
     if (dragButton === 'pan' && lastPan) {
@@ -55,7 +96,13 @@ export function setupInput(canvas, camera, world, state, ui) {
     }
   });
 
-  window.addEventListener('pointerup', () => { dragButton = null; lastPan = null; });
+  function releasePointer(e) {
+    activePointers.delete(e.pointerId);
+    if (activePointers.size < 2) pinch.active = false;
+    if (activePointers.size === 0) { dragButton = null; lastPan = null; }
+  }
+  window.addEventListener('pointerup', releasePointer);
+  window.addEventListener('pointercancel', releasePointer);
   canvas.addEventListener('pointerleave', () => { state.hover = null; });
 
   canvas.addEventListener('wheel', e => {

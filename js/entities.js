@@ -5,14 +5,14 @@ export const SENTIENT = new Set(['human', 'elf', 'orc']);
 export const SPECIES = {
   human: {
     label: 'Человек', race: 'human', diet: 'tree', speed: 0.10, hungerRate: 0.0016,
-    maxAge: 3200, adultAge: 220, visionRadius: 9, reproThreshold: 0.65, reproChance: 0.02,
-    reproCooldown: 180, cap: 220, color: '#e7b88a', outline: '#8a5a34', radius: 2.6,
+    maxAge: 3200, adultAge: 240, visionRadius: 9, reproThreshold: 0.65, reproChance: 0.008,
+    reproCooldown: 320, cap: 220, color: '#e7b88a', outline: '#8a5a34', radius: 2.6,
     fearOf: ['zombie', 'dragon'],
   },
   elf: {
     label: 'Эльф', race: 'elf', diet: 'tree', speed: 0.10, hungerRate: 0.0015,
-    maxAge: 3600, adultAge: 240, visionRadius: 9, reproThreshold: 0.65, reproChance: 0.018,
-    reproCooldown: 190, cap: 180, color: '#a3e0b8', outline: '#3f7a54', radius: 2.6,
+    maxAge: 3600, adultAge: 250, visionRadius: 9, reproThreshold: 0.65, reproChance: 0.007,
+    reproCooldown: 340, cap: 180, color: '#a3e0b8', outline: '#3f7a54', radius: 2.6,
     fearOf: ['zombie', 'dragon'],
   },
   orc: {

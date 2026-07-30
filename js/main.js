@@ -73,6 +73,13 @@ seedPopulation();
 const ui = setupUI(state, world);
 setupInput(canvas, camera, world, state, ui);
 
+function zoomBy(factor) {
+  camera.zoom = Math.max(0.3, Math.min(4, camera.zoom * factor));
+  camera.clamp(world);
+}
+document.getElementById('zoom-in-btn').addEventListener('click', () => zoomBy(1.25));
+document.getElementById('zoom-out-btn').addEventListener('click', () => zoomBy(1 / 1.25));
+
 let last = performance.now();
 let acc = 0;
 
