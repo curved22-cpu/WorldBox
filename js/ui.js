@@ -1,7 +1,12 @@
 import { TOOLS } from './tools.js';
-import { countBySpecies } from './entities.js';
+import { countBySpecies, civStats } from './entities.js';
+import { ERA_NAMES } from './world.js';
 
-const GROUP_LABEL = { terrain: 'Рельеф', life: 'Жизнь', disaster: 'Бедствия' };
+const GROUP_LABEL = {
+  terrain: 'Рельеф', nature: 'Природа', races: 'Расы', animals: 'Животные', disaster: 'Бедствия',
+};
+const RACE_ICON = { human: '🧍', elf: '🧝', orc: '👹' };
+const ROMAN = ['I', 'II', 'III', 'IV'];
 const BRUSH_SIZES = [0, 1, 2, 3, 4];
 
 export function setupUI(state, world) {
@@ -93,8 +98,18 @@ export function setupUI(state, world) {
 
   function syncStats() {
     const c = countBySpecies(world);
+    const civ = civStats(world);
+    const raceHtml = Object.keys(RACE_ICON).map(race => {
+      const s = civ[race];
+      return `<span title="${race}">${RACE_ICON[race]} ${s.population} <em>${ROMAN[s.era]}</em></span>`;
+    }).join('');
+    const monsterHtml = (c.zombie ? `<span>🧟 ${c.zombie}</span>` : '') +
+      (c.dragon ? `<span>🐉 ${c.dragon}</span>` : '');
     stats.innerHTML =
-      `<span>🧍 ${c.human}</span><span>🐑 ${c.sheep}</span><span>🐺 ${c.wolf}</span>` +
+      raceHtml +
+      `<span>🐑 ${c.sheep}</span><span>🐇 ${c.rabbit}</span><span>🐄 ${c.cow}</span>` +
+      `<span>🐺 ${c.wolf}</span><span>🐻 ${c.bear}</span>` +
+      monsterHtml +
       `<span>🌳 ${world.trees.size}</span><span>⏱ ${world.tick}</span>`;
   }
 

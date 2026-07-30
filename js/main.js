@@ -28,19 +28,45 @@ const renderer = new Renderer(canvas, world);
 
 const state = { toolId: 'raise', brushRadius: 1, paused: false, speed: 1, hover: null };
 
-function seedPopulation() {
-  const counts = { human: 18, sheep: 30, wolf: 6 };
-  for (const type in counts) {
-    let placed = 0, attempts = 0;
-    while (placed < counts[type] && attempts < counts[type] * 30) {
-      attempts++;
-      const x = Math.floor(Math.random() * world.width);
-      const y = Math.floor(Math.random() * world.height);
-      if (isLand(world.biome[world.idx(x, y)])) {
-        if (spawnEntity(world, type, x, y, { energy: 0.9, age: Math.floor(Math.random() * 200) })) placed++;
-      }
+function randomLandSpot() {
+  for (let tries = 0; tries < 400; tries++) {
+    const x = Math.floor(Math.random() * world.width);
+    const y = Math.floor(Math.random() * world.height);
+    if (isLand(world.biome[world.idx(x, y)])) return { x, y };
+  }
+  return { x: Math.floor(world.width / 2), y: Math.floor(world.height / 2) };
+}
+
+function seedCluster(type, count, center, spread) {
+  let placed = 0, attempts = 0;
+  while (placed < count && attempts < count * 40) {
+    attempts++;
+    const x = Math.round(center.x + (Math.random() * 2 - 1) * spread);
+    const y = Math.round(center.y + (Math.random() * 2 - 1) * spread);
+    if (world.inBounds(x, y) && isLand(world.biome[world.idx(x, y)])) {
+      if (spawnEntity(world, type, x, y, { energy: 0.9, age: Math.floor(Math.random() * 200) })) placed++;
     }
   }
+}
+
+function seedScattered(type, count) {
+  let placed = 0, attempts = 0;
+  while (placed < count && attempts < count * 30) {
+    attempts++;
+    const { x, y } = randomLandSpot();
+    if (spawnEntity(world, type, x, y, { energy: 0.9, age: Math.floor(Math.random() * 200) })) placed++;
+  }
+}
+
+function seedPopulation() {
+  for (const race of ['human', 'elf', 'orc']) {
+    seedCluster(race, 14, randomLandSpot(), 5);
+  }
+  seedScattered('sheep', 26);
+  seedScattered('rabbit', 26);
+  seedScattered('cow', 10);
+  seedScattered('wolf', 6);
+  seedScattered('bear', 5);
 }
 seedPopulation();
 

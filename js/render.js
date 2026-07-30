@@ -1,4 +1,5 @@
-import { Biome } from './world.js';
+import { Biome, RACES } from './world.js';
+import { SPECIES } from './entities.js';
 
 export const TILE = 14;
 
@@ -12,6 +13,14 @@ const BIOME_COLOR = {
   [Biome.ROCK]: '#8b8b8b',
   [Biome.SNOW]: '#f2f5f7',
 };
+
+const TERRITORY_TINT = {
+  human: 'rgba(231,184,138,0.20)',
+  elf: 'rgba(163,224,184,0.20)',
+  orc: 'rgba(143,174,92,0.22)',
+};
+
+const ERA_MATERIAL = ['#c9b89a', '#c98f4a', '#9aa0a6', '#6f7f9e'];
 
 export class Camera {
   constructor(canvas) {
@@ -61,13 +70,23 @@ export class Renderer {
     const w = world.width, h = world.height;
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        tctx.fillStyle = BIOME_COLOR[world.biome[world.idx(x, y)]];
+        const i = world.idx(x, y);
+        tctx.fillStyle = BIOME_COLOR[world.biome[i]];
         tctx.fillRect(x * TILE, y * TILE, TILE + 1, TILE + 1);
+        const terr = world.territory[i];
+        if (terr) {
+          tctx.fillStyle = TERRITORY_TINT[RACES[terr - 1]];
+          tctx.fillRect(x * TILE, y * TILE, TILE + 1, TILE + 1);
+        }
       }
     }
     for (const [i, t] of world.trees) {
       const x = i % w, y = Math.floor(i / w);
       this.drawTree(tctx, x * TILE + TILE / 2, y * TILE + TILE / 2, t.growth);
+    }
+    for (const [i, b] of world.buildings) {
+      const x = i % w, y = Math.floor(i / w);
+      this.drawBuilding(tctx, x * TILE + TILE / 2, y * TILE + TILE / 2, b.race, world.raceEra(b.race));
     }
     world.terrainDirty = false;
   }
@@ -82,20 +101,59 @@ export class Renderer {
     ctx.fill();
   }
 
+  drawBuilding(ctx, px, py, race, era) {
+    const size = 6 + era * 2.4;
+    ctx.fillStyle = ERA_MATERIAL[era];
+    ctx.fillRect(px - size / 2, py - size * 0.1, size, size * 0.7);
+    ctx.fillStyle = SPECIES[race] ? SPECIES[race].color : '#ccc';
+    ctx.beginPath();
+    ctx.moveTo(px - size / 2 - 1.5, py - size * 0.1);
+    ctx.lineTo(px, py - size * 0.1 - size * 0.65);
+    ctx.lineTo(px + size / 2 + 1.5, py - size * 0.1);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  drawDragon(ctx, px, py, cfg) {
+    ctx.fillStyle = cfg.color;
+    ctx.strokeStyle = cfg.outline;
+    ctx.lineWidth = 1;
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.moveTo(px + side * cfg.radius * 0.4, py);
+      ctx.lineTo(px + side * cfg.radius * 1.8, py - cfg.radius * 1.1);
+      ctx.lineTo(px + side * cfg.radius * 0.3, py - cfg.radius * 0.15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(px, py, cfg.radius * 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#ffd23b';
+    ctx.fillRect(px - 2, py - 1.5, 1.4, 1.4);
+    ctx.fillRect(px + 0.6, py - 1.5, 1.4, 1.4);
+  }
+
   drawEntity(ctx, e) {
+    const cfg = SPECIES[e.type];
     const px = e.x * TILE + TILE / 2, py = e.y * TILE + TILE / 2;
-    let fill, outline, r;
-    if (e.type === 'human') { fill = '#e7b88a'; outline = '#8a5a34'; r = 3; }
-    else if (e.type === 'sheep') { fill = e.fleeing ? '#ffe3e3' : '#f5f2e6'; outline = '#b9ad8f'; r = 3.6; }
-    else { fill = '#585866'; outline = '#2c2c33'; r = 3.8; }
+    if (e.type === 'dragon') { this.drawDragon(ctx, px, py, cfg); return; }
+    const r = cfg.radius;
     ctx.beginPath();
     ctx.arc(px, py, r, 0, Math.PI * 2);
-    ctx.fillStyle = fill;
+    ctx.fillStyle = (e.type === 'sheep' && e.fleeing) ? '#ffe3e3' : cfg.color;
     ctx.fill();
-    ctx.lineWidth = 0.8;
-    ctx.strokeStyle = outline;
+    ctx.lineWidth = e.combat ? 1.4 : 0.8;
+    ctx.strokeStyle = e.combat ? '#ff3b3b' : cfg.outline;
     ctx.stroke();
-    if (e.energy < 0.3) {
+    if (e.type === 'zombie') {
+      ctx.fillStyle = '#ff3b3b';
+      ctx.fillRect(px - 1.6, py - 1, 1, 1);
+      ctx.fillRect(px + 0.6, py - 1, 1, 1);
+    }
+    if (cfg.hungerRate > 0 && e.energy < 0.3) {
       ctx.fillStyle = 'rgba(255,60,60,0.85)';
       ctx.fillRect(px - 3, py - r - 4, 6 * Math.max(0, e.energy / 0.3), 1.6);
     }

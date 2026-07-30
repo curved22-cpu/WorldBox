@@ -21,6 +21,18 @@ const H = {
 
 export function isWater(b) { return b === Biome.DEEP_WATER || b === Biome.WATER; }
 export function isLand(b) { return !isWater(b); }
+export function isBuildable(b) { return b === Biome.GRASS || b === Biome.DESERT || b === Biome.SAND; }
+
+export const RACES = ['human', 'elf', 'orc'];
+export const ERA_NAMES = ['Каменный век', 'Бронзовый век', 'Железный век', 'Средневековье'];
+export const BUILDING_RADIUS_BASE = 7;
+
+export function eraForBuildings(n) {
+  if (n >= 12) return 3;
+  if (n >= 7) return 2;
+  if (n >= 3) return 1;
+  return 0;
+}
 
 export class World {
   constructor(width, height, seed) {
@@ -29,6 +41,7 @@ export class World {
     this.tick = 0;
     this.trees = new Map(); // idx -> { growth: 0..1 }
     this.fires = new Map(); // idx -> { life }
+    this.buildings = new Map(); // idx -> { race, hp, maxHp }
     this.entities = [];
     this.terrainDirty = true;
     this.regenerate(seed);
@@ -44,7 +57,9 @@ export class World {
     this.biome = new Uint8Array(n);
     this.trees.clear();
     this.fires.clear();
+    this.buildings.clear();
     this.entities.length = 0;
+    this.territory = new Uint8Array(n);
 
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
@@ -152,6 +167,8 @@ export class World {
     if (!this.inBounds(x, y)) return;
     const victim = this.entities.find(e => e.alive && Math.round(e.x) === x && Math.round(e.y) === y);
     if (victim) { victim.alive = false; victim.deathCause = 'lightning'; }
+    const i = this.idx(x, y);
+    if (this.buildings.delete(i)) this.terrainDirty = true;
     this.igniteFire(x, y);
   }
 
@@ -161,6 +178,7 @@ export class World {
       this.heightMap[i] = Math.max(0, this.heightMap[i] - 0.55 * falloff);
       this.recomputeBiome(i);
       this.trees.delete(i);
+      this.buildings.delete(i);
       if (d > radius * 0.55 && d < radius) this.igniteFire(x, y);
     });
     for (const e of this.entities) {
@@ -173,9 +191,51 @@ export class World {
 
   killAt(x, y) {
     const i = this.idx(x, y);
-    if (this.trees.has(i)) { this.trees.delete(i); this.terrainDirty = true; return; }
     const victim = this.entities.find(e => e.alive && Math.round(e.x) === x && Math.round(e.y) === y);
-    if (victim) { victim.alive = false; victim.deathCause = 'erased'; }
+    if (victim) { victim.alive = false; victim.deathCause = 'erased'; return; }
+    if (this.trees.delete(i)) { this.terrainDirty = true; return; }
+    if (this.buildings.delete(i)) this.terrainDirty = true;
+  }
+
+  foundBuilding(x, y, race) {
+    if (!this.inBounds(x, y)) return false;
+    const i = this.idx(x, y);
+    if (this.buildings.has(i) || this.trees.has(i)) return false;
+    if (!isBuildable(this.biome[i])) return false;
+    this.buildings.set(i, { race, hp: 1, maxHp: 1 });
+    this.terrainDirty = true;
+    return true;
+  }
+
+  damageBuilding(x, y, dmg) {
+    const i = this.idx(x, y);
+    const b = this.buildings.get(i);
+    if (!b) return;
+    b.hp -= dmg;
+    if (b.hp <= 0) { this.buildings.delete(i); this.terrainDirty = true; }
+  }
+
+  raceBuildingCount(race) {
+    let c = 0;
+    for (const b of this.buildings.values()) if (b.race === race) c++;
+    return c;
+  }
+
+  raceEra(race) { return eraForBuildings(this.raceBuildingCount(race)); }
+
+  recomputeTerritory() {
+    this.territory.fill(0);
+    if (this.buildings.size === 0) return;
+    const dist = new Float32Array(this.width * this.height).fill(Infinity);
+    for (const [i, b] of this.buildings) {
+      const bx = i % this.width, by = Math.floor(i / this.width);
+      const R = BUILDING_RADIUS_BASE + this.raceEra(b.race) * 2;
+      const raceIdx = RACES.indexOf(b.race) + 1;
+      this.forEachInRadius(bx, by, R, (x, y, ti, d) => {
+        if (d < dist[ti]) { dist[ti] = d; this.territory[ti] = raceIdx; }
+      });
+    }
+    this.terrainDirty = true;
   }
 
   stepFire() {
@@ -201,6 +261,7 @@ export class World {
           e.alive = false; e.deathCause = 'fire';
         }
       }
+      if (this.buildings.has(i) && Math.random() < 0.3) { this.buildings.delete(i); this.terrainDirty = true; }
       if (f.life <= 0) {
         this.trees.delete(i);
         if (this.biome[i] === Biome.GRASS || this.biome[i] === Biome.DESERT) this.biome[i] = Biome.DIRT;
@@ -248,5 +309,6 @@ export class World {
     this.stepFire();
     this.stepTrees();
     this.stepDirtRegrowth();
+    if (this.tick % 100 === 0) this.recomputeTerritory();
   }
 }
