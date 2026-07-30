@@ -55,14 +55,13 @@ function planNextBuilding(settlement, livingCount) {
 }
 
 function assignJobs(settlement, adults) {
-  const total = adults.length + 0;
-  const needWood = settlement.stock.wood < adults.length * 4 || settlement.constructionQueue;
-  const needMineral = settlement.era >= 2 && (settlement.constructionQueue || settlement.stock.stone < adults.length * 3);
+  const needWood = settlement.stock.wood < adults.length * 4;
+  const needMineral = settlement.era >= 2 && settlement.stock.stone < adults.length * 3;
   const targets = [
     ['farmer', Math.max(1, Math.ceil(adults.length / 5)), 'strength'],
+    ['builder', settlement.constructionQueue ? Math.min(3, Math.max(1, Math.ceil(adults.length / 6))) : 0, 'strength'],
     ['woodcutter', needWood ? Math.max(1, Math.ceil(adults.length / 8)) : 0, 'strength'],
     ['miner', needMineral ? Math.max(1, Math.ceil(adults.length / 9)) : 0, 'strength'],
-    ['builder', settlement.constructionQueue ? Math.min(3, Math.max(1, Math.ceil(adults.length / 6))) : 0, 'strength'],
     ['researcher', adults.length >= 2 ? Math.min(3, Math.floor(adults.length / 6) + 1) : 0, 'intelligence'],
     ['soldier', settlement.era >= 3 ? Math.min(Math.floor(adults.length / 4), settlement.atWarWith.length ? 6 : 1) : 0, 'strength'],
   ];
