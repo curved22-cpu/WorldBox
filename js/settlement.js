@@ -67,10 +67,19 @@ function assignJobs(settlement, adults) {
   ];
   const validJobs = new Set(targets.filter(t => t[1] > 0).map(t => t[0]));
   for (const p of adults) if (p.job && !validJobs.has(p.job)) p.job = null;
-  for (const [job, target, statKey] of targets) {
+  for (let ti = 0; ti < targets.length; ti++) {
+    const [job, target, statKey] = targets[ti];
     let have = adults.filter(p => p.job === job).length;
     if (have >= target) continue;
-    const candidates = adults.filter(p => !p.job).sort((a, b) => b.stats[statKey] - a.stats[statKey]);
+    let candidates = adults.filter(p => !p.job).sort((a, b) => b.stats[statKey] - a.stats[statKey]);
+    for (const c of candidates) {
+      if (have >= target) break;
+      c.job = job; have++;
+    }
+    if (have >= target) continue;
+    // no free hands left — pull someone from a lower-priority role instead
+    const laterJobs = new Set(targets.slice(ti + 1).map(t => t[0]));
+    candidates = adults.filter(p => laterJobs.has(p.job)).sort((a, b) => b.stats[statKey] - a.stats[statKey]);
     for (const c of candidates) {
       if (have >= target) break;
       c.job = job; have++;
