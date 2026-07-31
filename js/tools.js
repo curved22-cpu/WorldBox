@@ -23,7 +23,7 @@ export const TOOLS = [
   {
     id: 'gift', name: 'Дар ресурсов', icon: '🎁', target: 'settlement',
     apply(game, settlement) {
-      settlement.stock.wood += 60; settlement.stock.food += 60; settlement.stock.stone += 25;
+      settlement.stock.wood += 60; settlement.stock.grain += 40; settlement.stock.bread += 20; settlement.stock.stone += 25;
       addEvent(game.events, game.day, `«${settlement.name}» получает щедрый дар от небес.`, 'normal');
     },
   },
@@ -48,7 +48,8 @@ export const TOOLS = [
     apply(game, settlement) {
       if (settlement.constructionQueue) settlement.constructionQueue.progress *= 0.4;
       settlement.stock.wood = Math.max(0, settlement.stock.wood - 30);
-      settlement.stock.food = Math.max(0, settlement.stock.food - 30);
+      settlement.stock.grain = Math.max(0, settlement.stock.grain - 20);
+      settlement.stock.bread = Math.max(0, settlement.stock.bread - 20);
       for (const p of livingPeople(settlement, game)) {
         if (Math.random() < 0.3) p.needs.health = Math.max(0, p.needs.health - 20);
       }

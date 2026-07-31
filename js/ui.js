@@ -82,6 +82,16 @@ export function setupOnboarding(onStart) {
   });
 }
 
+function stockGrid(s) {
+  return `<div class="stock-grid">
+    <span>🪵 ${Math.floor(s.stock.wood)}</span><span>🪨 ${Math.floor(s.stock.stone)}</span><span>⚙️ ${Math.floor(s.stock.ore)}</span>
+    <span>🌾 ${Math.floor(s.stock.grain)}</span><span>🌫️ ${Math.floor(s.stock.flour)}</span><span>🍞 ${Math.floor(s.stock.bread)}</span>
+    <span>🍖 ${Math.floor(s.stock.meat)}</span><span>🐟 ${Math.floor(s.stock.fish)}</span>
+    <span>🔨 ${Math.floor(s.stock.tools)}</span><span>🧵 ${Math.floor(s.stock.clothes)}</span>
+    <span>📚 ${Math.floor(s.stock.knowledge)}</span>
+  </div>`;
+}
+
 function statBar(label, value, max = 100) {
   const pct = Math.max(0, Math.min(100, (value / max) * 100));
   return `<div class="bar-row"><span class="bar-label">${label}</span>
@@ -171,11 +181,7 @@ export function setupGameUI(game, onToolApply, onNewGame) {
       <h2>${s.name}</h2>
       <div class="insp-sub">${ERAS[s.era].name} · население ${living.length}/${cap}</div>
       <h3>Запасы</h3>
-      <div class="stock-grid">
-        <span>🪵 ${Math.floor(s.stock.wood)}</span><span>🍎 ${Math.floor(s.stock.food)}</span>
-        <span>🪨 ${Math.floor(s.stock.stone)}</span><span>⚙️ ${Math.floor(s.stock.ore)}</span>
-        <span>📚 ${Math.floor(s.stock.knowledge)}</span>
-      </div>
+      ${stockGrid(s)}
       <h3>Постройки</h3>
       <div class="buildings-list">${s.buildings.length ? s.buildings.map((b, i) =>
         `<a data-selbuild="${i}">${BUILDING_INFO[b.type].icon} ${BUILDING_INFO[b.type].label}</a>`).join(', ') : '<em>нет</em>'}
@@ -227,13 +233,7 @@ export function setupGameUI(game, onToolApply, onNewGame) {
       <h2>${info.icon} ${info.label}</h2>
       <div class="insp-sub">Поселение «${s.name}» · построено в ${dayToYear(b.builtDay)} г.</div>
       <p class="insp-desc">${BUILDING_DESC[b.type] || ''}</p>
-      ${b.type === 'storage' ? `
-        <h3>Запасы поселения</h3>
-        <div class="stock-grid">
-          <span>🪵 ${Math.floor(s.stock.wood)}</span><span>🍎 ${Math.floor(s.stock.food)}</span>
-          <span>🪨 ${Math.floor(s.stock.stone)}</span><span>⚙️ ${Math.floor(s.stock.ore)}</span>
-          <span>📚 ${Math.floor(s.stock.knowledge)}</span>
-        </div>` : ''}
+      ${b.type === 'storage' ? `<h3>Запасы поселения</h3>${stockGrid(s)}` : ''}
       ${isHousing ? `
         <h3>Жители (${residents.length}/${info.cap})</h3>
         <div class="people-list">${residents.length ? residents.map(p => `<a data-sel="person:${p.id}">${p.name}</a>`).join(', ') : '<em>пусто</em>'}</div>

@@ -4,7 +4,8 @@ import { createSettlement, tickSettlement, livingPeople, housingCap } from './se
 import { createEventLog, addEvent } from './events.js';
 import { ERAS } from './eras.js';
 import { DAYS_PER_YEAR } from './time.js';
-import { initSites } from './tasks.js';
+import { initField } from './tasks.js';
+import { generateWorldResources, growTrees, maybeSpawnTree, tickWildlife } from './resources.js';
 
 export const WORLD_W = 220, WORLD_H = 140;
 
@@ -27,6 +28,7 @@ export function createGame(seed, settlementName, founder1, founder2) {
   const spot = findLandSpot(terrain, null);
   const game = {
     day: 0, seed, terrain,
+    world: generateWorldResources(terrain),
     people: new Map(),
     settlements: [],
     events: createEventLog(),
@@ -36,7 +38,7 @@ export function createGame(seed, settlementName, founder1, founder2) {
     selected: null,
   };
   const settlement = createSettlement({ name: settlementName || 'Первое поселение', x: spot.x, y: spot.y, foundedDay: 0 });
-  initSites(settlement, terrain);
+  initField(settlement, terrain);
   const pos = { x: spot.x, y: spot.y };
   const p1 = createPerson({
     name: founder1.name, sex: founder1.sex, stats: founder1.stats,
@@ -61,7 +63,8 @@ function battleStrength(settlement, game) {
   const soldiers = livingPeople(settlement, game).filter(p => p.job === 'soldier');
   const eraInfo = ERAS[settlement.era];
   const power = eraInfo.military ? eraInfo.military.power : 1;
-  return soldiers.reduce((sum, p) => sum + (1 + p.skills.combat / 40 + p.stats.strength / 80), 0.4) * power;
+  const navalBonus = settlement.buildings.some(b => b.type === 'dock') ? 1.15 : 1;
+  return soldiers.reduce((sum, p) => sum + (1 + p.skills.combat / 40 + p.stats.strength / 80), 0.4) * power * navalBonus;
 }
 
 function resolveBattle(game, a, b, day) {
@@ -114,9 +117,12 @@ function maybeColonize(game, settlement, day) {
   if (adults.length < 5) return;
   const shuffled = [...adults].sort(() => Math.random() - 0.5);
   const group = shuffled.slice(0, 3 + Math.floor(Math.random() * 2));
-  const spot = findLandSpot(game.terrain, { x: settlement.x, y: settlement.y });
+  // With a dock, settlers take to boats and can found a settlement across the
+  // sea, not just walk further along the same coastline.
+  const hasDock = settlement.buildings.some(b => b.type === 'dock');
+  const spot = findLandSpot(game.terrain, { x: settlement.x, y: settlement.y }, hasDock ? 170 : 70);
   const newSettlement = createSettlement({ name: nextSettlementName(), x: spot.x, y: spot.y, foundedDay: day });
-  initSites(newSettlement, game.terrain);
+  initField(newSettlement, game.terrain);
   for (const p of group) {
     settlement.peopleIds = settlement.peopleIds.filter(id => id !== p.id);
     newSettlement.peopleIds.push(p.id);
@@ -125,7 +131,6 @@ function maybeColonize(game, settlement, day) {
     p.task = null;
     p.homeIndex = null;
   }
-  newSettlement.stock.food = 15;
   game.settlements.push(newSettlement);
   addEvent(game.events, day,
     `Группа переселенцев (${group.map(p => p.name).join(', ')}) покидает «${settlement.name}» и основывает новое поселение «${newSettlement.name}».`,
@@ -133,6 +138,9 @@ function maybeColonize(game, settlement, day) {
 }
 
 export function tickDay(game, liveMode = false) {
+  growTrees(game.world, game.day);
+  maybeSpawnTree(game.world, game.terrain, game.day, game.settlements);
+  tickWildlife(game.world, game.terrain, game.day);
   for (const s of game.settlements) tickSettlement(s, game, game.day, liveMode);
   tickWars(game, game.day);
   for (const s of [...game.settlements]) maybeColonize(game, s, game.day);

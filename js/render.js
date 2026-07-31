@@ -2,6 +2,7 @@ import { Biome } from './terrain.js';
 import { ERAS, BUILDING_INFO } from './eras.js';
 import { isAdult } from './person.js';
 import { livingPeople, housingCap } from './settlement.js';
+import { ANIMAL_KINDS } from './resources.js';
 
 export const TILE = 10;
 
@@ -16,11 +17,11 @@ const BIOME_COLOR = {
 };
 
 const JOB_COLOR = {
-  farmer: '#e0c34c', woodcutter: '#8a5a34', miner: '#9aa0a6',
+  farmer: '#e0c34c', hunter: '#c77b3f', fisherman: '#4fa8c9', woodcutter: '#8a5a34', miner: '#9aa0a6',
   builder: '#e08a3a', researcher: '#5aa0e0', soldier: '#d0453a',
 };
 export const JOB_LABEL = {
-  farmer: 'земледелец', woodcutter: 'дровосек', miner: 'горняк',
+  farmer: 'земледелец', hunter: 'охотник', fisherman: 'рыбак', woodcutter: 'дровосек', miner: 'горняк',
   builder: 'строитель', researcher: 'учёный', soldier: 'воин',
 };
 
@@ -99,6 +100,25 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(px + 1.5, py + 1, 2, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  drawFishSpot(ctx, x, y) {
+    const px = x * TILE, py = y * TILE;
+    const t = performance.now() / 700;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.arc(px, py, 2 + Math.sin(t + x) * 0.5 + 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  drawAnimal(ctx, a) {
+    const px = a.x * TILE, py = a.y * TILE;
+    const info = ANIMAL_KINDS[a.kind];
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(info ? info.icon : '🐾', px, py);
   }
 
   drawField(ctx, field) {
@@ -236,11 +256,17 @@ export class Renderer {
 
     camera.applyTransform(ctx);
 
-    for (const s of game.settlements) {
-      this.drawField(ctx, s.field);
-      for (const r of s.rocks) this.drawRock(ctx, r.x, r.y);
-      for (const t of s.trees) this.drawTree(ctx, t.x, t.y, t.stage);
-    }
+    const [vx0, vy0] = camera.screenToWorld(0, 0);
+    const [vx1, vy1] = camera.screenToWorld(canvas.width, canvas.height);
+    const minX = Math.min(vx0, vx1) - 3, maxX = Math.max(vx0, vx1) + 3;
+    const minY = Math.min(vy0, vy1) - 3, maxY = Math.max(vy0, vy1) + 3;
+    const inView = o => o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY;
+
+    for (const s of game.settlements) this.drawField(ctx, s.field);
+    for (const r of game.world.rocks) if (inView(r)) this.drawRock(ctx, r.x, r.y);
+    for (const t of game.world.trees) if (inView(t)) this.drawTree(ctx, t.x, t.y, t.stage);
+    for (const f of game.world.fishSpots) if (inView(f)) this.drawFishSpot(ctx, f.x, f.y);
+    for (const a of game.world.animals) if (inView(a)) this.drawAnimal(ctx, a);
     for (const s of game.settlements) {
       const selectedSettlement = game.selected && game.selected.type === 'settlement' && game.selected.id === s.id;
       this.drawStorageMarker(ctx, s, selectedSettlement);

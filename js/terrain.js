@@ -40,10 +40,10 @@ export function generateTerrain(width, height, seed) {
   return { width, height, heightMap, moisture, biome, idx };
 }
 
-export function findLandSpot(terrain, near) {
+export function findLandSpot(terrain, near, nearMaxR) {
   const { width, height, biome, idx } = terrain;
   let best = null, bestScore = -Infinity;
-  const minR = near ? 25 : 0, maxR = near ? 70 : Math.max(width, height) * 0.6;
+  const minR = near ? 25 : 0, maxR = near ? (nearMaxR || 70) : Math.max(width, height) * 0.6;
   for (let tries = 0; tries < 600; tries++) {
     let xx, yy;
     if (near) {

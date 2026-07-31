@@ -1,55 +1,39 @@
 import { Biome, isLand } from './terrain.js';
 import { addEvent } from './events.js';
+import { ANIMAL_KINDS, findPlantSpot, updateAnimals } from './resources.js';
 
 export const WALK_SPEED = 2.4; // tiles per sim-second
 const CHOP_DURATION = 2.5;
 const MINE_DURATION = 3;
 const FARM_DURATION = 3;
+const HUNT_DURATION = 4;
+const FISH_DURATION = 3;
 const BUILD_DURATION = 2.5;
 const PLANT_DURATION = 2;
 const PICKUP_PAUSE = 0.6;
 const DROP_PAUSE = 0.5;
+const HUNT_CATCH_RADIUS = 3.2;
 
 // Rough cycles/day a worker completes given the travel distances used below —
 // gather/build yields are derived from the old per-day formulas divided by
 // these, so watching it happen live gives roughly the same totals as the
 // fast offline catch-up simulation.
-const CYCLES_PER_DAY = { wood: 3.2, stone: 2.75, ore: 2.75, food: 5.6, build: 6.0 };
+const CYCLES_PER_DAY = { wood: 3.2, stone: 2.75, ore: 2.75, grain: 5.6, hunt: 2.0, fish: 3.4, build: 6.0 };
 
-// Tree growth: a sapling becomes a bush, then a medium tree, then a large
-// tree old enough to harvest. Age is tracked in days since planting.
-const TREE_STAGE_AGE = [0, 8, 20, 40]; // days needed to reach stage 0,1,2,3
-const MAX_TREES = 26;
-const TREE_SPACING = 1.3;
-
-export function initSites(settlement, terrain) {
-  settlement.trees = [];
-  settlement.nextTreeId = 0;
-  for (let i = 0; i < 20; i++) {
-    const spot = scatterSpot(settlement, terrain, 4, 16, [Biome.FOREST, Biome.GRASS], null);
-    settlement.trees.push({ id: settlement.nextTreeId++, x: spot.x, y: spot.y, stage: 3, plantedDay: -1000 });
-  }
-  settlement.rocks = [];
-  for (let i = 0; i < 10; i++) {
-    const spot = scatterSpot(settlement, terrain, 5, 18, [Biome.ROCK, Biome.SAND, Biome.GRASS], null);
-    settlement.rocks.push({ id: i, x: spot.x, y: spot.y });
-  }
-  settlement.field = scatterSpot(settlement, terrain, 2.5, 5, [Biome.GRASS], null);
+export function initField(settlement, terrain) {
+  settlement.field = scatterSpot(settlement, terrain, 2.5, 5, [Biome.GRASS]);
 }
 
 // Always returns a tile on land — first choice is one of the preferred
-// biomes (respecting minimum spacing from existing trees if given), then any
-// land tile in range, then the settlement's own tile (guaranteed land since
-// findLandSpot placed the settlement there).
-function scatterSpot(settlement, terrain, minR, maxR, preferredBiomes, avoidList) {
-  const tooClose = (x, y) => avoidList && avoidList.some(o => (o.x - x) ** 2 + (o.y - y) ** 2 < TREE_SPACING ** 2);
+// biomes, then any land tile in range, then the settlement's own tile
+// (which findLandSpot already guaranteed is land when it was founded).
+function scatterSpot(settlement, terrain, minR, maxR, preferredBiomes) {
   for (let tries = 0; tries < 30; tries++) {
     const a = Math.random() * Math.PI * 2;
     const r = minR + Math.random() * (maxR - minR);
     const x = Math.round(settlement.x + Math.cos(a) * r);
     const y = Math.round(settlement.y + Math.sin(a) * r);
     if (x < 1 || y < 1 || x >= terrain.width - 1 || y >= terrain.height - 1) continue;
-    if (tooClose(x, y)) continue;
     if (preferredBiomes.includes(terrain.biome[terrain.idx(x, y)])) return { x, y };
   }
   for (let tries = 0; tries < 60; tries++) {
@@ -58,10 +42,9 @@ function scatterSpot(settlement, terrain, minR, maxR, preferredBiomes, avoidList
     const x = Math.round(settlement.x + Math.cos(a) * r);
     const y = Math.round(settlement.y + Math.sin(a) * r);
     if (x < 1 || y < 1 || x >= terrain.width - 1 || y >= terrain.height - 1) continue;
-    if (tooClose(x, y)) continue;
     if (isLand(terrain.biome[terrain.idx(x, y)])) return { x, y };
   }
-  return avoidList ? null : { x: settlement.x, y: settlement.y };
+  return { x: settlement.x, y: settlement.y };
 }
 
 export function nearestLandSpot(pos, terrain) {
@@ -85,29 +68,6 @@ export function nextBuildingSlot(settlement, index) {
   return { x: settlement.x + Math.cos(ang) * r, y: settlement.y + Math.sin(ang) * r };
 }
 
-export function growTrees(settlement, day) {
-  for (const t of settlement.trees) {
-    const age = day - t.plantedDay;
-    let stage = 0;
-    for (let s = TREE_STAGE_AGE.length - 1; s >= 0; s--) if (age >= TREE_STAGE_AGE[s]) { stage = s; break; }
-    t.stage = stage;
-  }
-}
-
-export function maybeSpawnTree(settlement, terrain, day) {
-  if (settlement.trees.length >= MAX_TREES) return;
-  const hasSawmill = settlement.buildings.some(b => b.type === 'sawmill');
-  const chance = hasSawmill ? 0.1 : 0.025;
-  if (Math.random() > chance) return;
-  const spot = scatterSpot(settlement, terrain, 4, 16, [Biome.FOREST, Biome.GRASS], settlement.trees);
-  if (spot) settlement.trees.push({ id: settlement.nextTreeId++, x: spot.x, y: spot.y, stage: 0, plantedDay: day });
-}
-
-function findPlantSpot(settlement, terrain) {
-  if (settlement.trees.length >= MAX_TREES) return null;
-  return scatterSpot(settlement, terrain, 3, 14, [Biome.FOREST, Biome.GRASS], settlement.trees);
-}
-
 function moveToward(person, tx, ty, dtSec) {
   const dx = tx - person.pos.x, dy = ty - person.pos.y;
   const d = Math.hypot(dx, dy);
@@ -122,7 +82,11 @@ function moveToward(person, tx, ty, dtSec) {
 // used to avoid sending someone to a resource across a bay or inlet, which
 // would otherwise look like they're walking on water.
 function pathIsClear(terrain, x0, y0, x1, y1) {
-  const steps = 16;
+  // Sample roughly every half-tile so long-range world resource searches
+  // (now up to ~60 tiles away) don't skip over a thin strait or inlet that a
+  // coarse fixed sample count would miss.
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.max(16, Math.ceil(dist * 4));
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
     const x = Math.round(x0 + (x1 - x0) * t), y = Math.round(y0 + (y1 - y0) * t);
@@ -132,43 +96,62 @@ function pathIsClear(terrain, x0, y0, x1, y1) {
   return true;
 }
 
-function nearestReachable(list, from, terrain) {
+// Only consider resources within a growing radius of the worker so a huge
+// world-wide array doesn't get fully scanned every time, and workers prefer
+// what's nearby before ranging further out as it gets scarce locally.
+function nearestReachable(list, from, terrain, maxR = 45) {
   let best = null, bestD = Infinity;
   let fallback = null, fallbackD = Infinity;
+  const maxD2 = maxR * maxR;
   for (const item of list) {
     const d = (item.x - from.x) ** 2 + (item.y - from.y) ** 2;
+    if (d > maxD2) continue;
     if (d < fallbackD) { fallbackD = d; fallback = item; }
     if (d < bestD && pathIsClear(terrain, from.x, from.y, item.x, item.y)) { bestD = d; best = item; }
   }
   return best || fallback;
 }
 
-function nearestTree(settlement, from, terrain) {
-  return nearestReachable(settlement.trees.filter(t => t.stage === 3), from, terrain);
+function nearestTree(game, from, terrain) {
+  return nearestReachable(game.world.trees.filter(t => t.stage === 3), from, terrain);
 }
 
-function nearestRock(settlement, from, terrain) {
-  return nearestReachable(settlement.rocks, from, terrain);
+function nearestRock(game, from, terrain) {
+  return nearestReachable(game.world.rocks, from, terrain);
 }
 
-function assignTask(person, settlement, terrain) {
+function nearestAnimal(game, from, terrain) {
+  return nearestReachable(game.world.animals, from, terrain, 60);
+}
+
+function nearestFishSpot(game, from, terrain) {
+  return nearestReachable(game.world.fishSpots, from, terrain, 60);
+}
+
+function assignTask(person, settlement, game) {
+  const terrain = game.terrain;
   const job = person.job;
   if (job === 'woodcutter') {
-    const tree = nearestTree(settlement, person.pos, terrain);
+    const tree = nearestTree(game, person.pos, terrain);
     if (tree) {
       person.task = { kind: 'wood', phase: 'toSite', treeId: tree.id, timer: 0, carrying: 0 };
       return;
     }
     const hasSawmill = settlement.buildings.some(b => b.type === 'sawmill');
-    const spot = hasSawmill && pathIsClear(terrain, person.pos.x, person.pos.y, person.pos.x, person.pos.y)
-      ? findPlantSpot(settlement, terrain) : null;
+    const spot = hasSawmill ? findPlantSpot(game.world, terrain, person.pos) : null;
     person.task = spot ? { kind: 'plant', phase: 'toSite', tx: spot.x, ty: spot.y, timer: 0 } : null;
   } else if (job === 'miner') {
-    const rock = nearestRock(settlement, person.pos, terrain);
+    const rock = nearestRock(game, person.pos, terrain);
     const wantOre = settlement.era >= 5 && Math.random() < 0.4;
     person.task = rock ? { kind: wantOre ? 'ore' : 'stone', phase: 'toSite', rockId: rock.id, timer: 0, carrying: 0 } : null;
   } else if (job === 'farmer') {
-    person.task = { kind: 'food', phase: 'toSite', timer: 0, carrying: 0 };
+    person.task = { kind: 'grain', phase: 'toSite', timer: 0, carrying: 0 };
+  } else if (job === 'hunter') {
+    const animal = nearestAnimal(game, person.pos, terrain);
+    person.task = animal ? { kind: 'hunt', phase: 'toSite', animalId: animal.id, tx: animal.x, ty: animal.y, timer: 0, carrying: 0 } : null;
+  } else if (job === 'fisherman') {
+    const spot = nearestFishSpot(game, person.pos, terrain);
+    person.task = spot ? { kind: 'fish', phase: 'toSite', fishId: spot.id, timer: 0, carrying: 0 } : null;
   } else if (job === 'builder') {
     person.task = settlement.constructionQueue ? { kind: 'build', phase: 'toStorage', timer: 0, carrying: 0 } : null;
   } else {
@@ -206,6 +189,36 @@ function updateGather(person, settlement, t, dtSec, day, resKey, yieldPerCycle, 
   }
 }
 
+function updateHunt(person, settlement, t, dtSec, game, huntBonus) {
+  if (t.phase === 'toSite') {
+    if (moveToward(person, t.tx, t.ty, dtSec)) { t.phase = 'working'; t.timer = HUNT_DURATION; }
+  } else if (t.phase === 'working') {
+    t.timer -= dtSec;
+    if (t.timer <= 0) {
+      const idx = game.world.animals.findIndex(a => a.id === t.animalId);
+      t.carrying = 0;
+      if (idx !== -1) {
+        const a = game.world.animals[idx];
+        if ((a.x - t.tx) ** 2 + (a.y - t.ty) ** 2 < HUNT_CATCH_RADIUS ** 2) {
+          t.carrying = (ANIMAL_KINDS[a.kind].food * huntBonus) / CYCLES_PER_DAY.hunt;
+          game.world.animals.splice(idx, 1);
+        }
+      }
+      person.skills.combat = Math.min(100, person.skills.combat + 0.02);
+      t.phase = 'toDrop';
+    }
+  } else if (t.phase === 'toDrop') {
+    if (moveToward(person, settlement.x, settlement.y, dtSec)) { t.phase = 'depositing'; t.timer = DROP_PAUSE; }
+  } else if (t.phase === 'depositing') {
+    t.timer -= dtSec;
+    if (t.timer <= 0) {
+      if (t.carrying > 0) settlement.stock.meat = (settlement.stock.meat || 0) + t.carrying;
+      t.carrying = 0;
+      person.task = null;
+    }
+  }
+}
+
 function updateBuild(person, settlement, t, dtSec) {
   if (!settlement.constructionQueue) { person.task = null; return; }
   if (t.phase === 'toStorage') {
@@ -226,15 +239,14 @@ function updateBuild(person, settlement, t, dtSec) {
   }
 }
 
-function updatePlant(person, settlement, t, dtSec, day) {
+function updatePlant(person, settlement, t, dtSec, day, game) {
   if (t.phase === 'toSite') {
     if (moveToward(person, t.tx, t.ty, dtSec)) { t.phase = 'planting'; t.timer = PLANT_DURATION; }
   } else if (t.phase === 'planting') {
     t.timer -= dtSec;
     if (t.timer <= 0) {
-      if (settlement.trees.length < MAX_TREES) {
-        settlement.trees.push({ id: settlement.nextTreeId++, x: t.tx, y: t.ty, stage: 0, plantedDay: day });
-      }
+      const world = game.world;
+      if (world.trees.length < 900) world.trees.push({ id: world.nextTreeId++, x: t.tx, y: t.ty, stage: 0, plantedDay: day });
       person.skills.woodcutting = Math.min(100, person.skills.woodcutting + 0.02);
       person.task = null;
     }
@@ -257,13 +269,15 @@ function updateIdle(person, settlement, t, dtSec, terrain) {
 function jobMatchesTask(job, taskKind) {
   if (job === 'woodcutter') return taskKind === 'wood' || taskKind === 'plant';
   if (job === 'miner') return taskKind === 'stone' || taskKind === 'ore';
-  if (job === 'farmer') return taskKind === 'food';
+  if (job === 'farmer') return taskKind === 'grain';
+  if (job === 'hunter') return taskKind === 'hunt';
+  if (job === 'fisherman') return taskKind === 'fish';
   if (job === 'builder') return taskKind === 'build';
   return taskKind === 'idle';
 }
 
 export function updateTask(person, settlement, dtSec, day, bonuses, game) {
-  if (!person.task || !jobMatchesTask(person.job, person.task.kind)) assignTask(person, settlement, game.terrain);
+  if (!person.task || !jobMatchesTask(person.job, person.task.kind)) assignTask(person, settlement, game);
   const t = person.task;
   if (!t) return;
 
@@ -271,10 +285,10 @@ export function updateTask(person, settlement, dtSec, day, bonuses, game) {
     t.workDuration = CHOP_DURATION;
     updateGather(person, settlement, t, dtSec, day, 'wood',
       ((5 + person.stats.strength / 12) * bonuses.wood * bonuses.rail) / CYCLES_PER_DAY.wood,
-      () => settlement.trees.find(x => x.id === t.treeId && x.stage === 3) || null,
+      () => game.world.trees.find(x => x.id === t.treeId && x.stage === 3) || null,
       () => {
-        const idx = settlement.trees.findIndex(x => x.id === t.treeId);
-        if (idx !== -1) settlement.trees.splice(idx, 1);
+        const idx = game.world.trees.findIndex(x => x.id === t.treeId);
+        if (idx !== -1) game.world.trees.splice(idx, 1);
         person.skills.woodcutting = Math.min(100, person.skills.woodcutting + 0.03);
         if (!settlement.milestones.firstTree) {
           settlement.milestones.firstTree = true;
@@ -282,20 +296,32 @@ export function updateTask(person, settlement, dtSec, day, bonuses, game) {
         }
       }, game);
   } else if (t.kind === 'plant') {
-    updatePlant(person, settlement, t, dtSec, day);
+    updatePlant(person, settlement, t, dtSec, day, game);
   } else if (t.kind === 'stone' || t.kind === 'ore') {
     t.workDuration = MINE_DURATION;
     const yieldPerCycle = t.kind === 'stone'
       ? ((4 + person.stats.strength / 14) * bonuses.mine * bonuses.rail) / CYCLES_PER_DAY.stone
       : ((3 + person.stats.strength / 16) * bonuses.mine * bonuses.refinery) / CYCLES_PER_DAY.ore;
     updateGather(person, settlement, t, dtSec, day, t.kind, yieldPerCycle,
-      () => settlement.rocks.find(x => x.id === t.rockId) || null, null, game);
-  } else if (t.kind === 'food') {
+      () => game.world.rocks.find(x => x.id === t.rockId) || null, null, game);
+  } else if (t.kind === 'grain') {
     t.workDuration = FARM_DURATION;
-    updateGather(person, settlement, t, dtSec, day, 'food',
-      ((12 + person.stats.strength / 6) * bonuses.farm * bonuses.rail) / CYCLES_PER_DAY.food,
+    updateGather(person, settlement, t, dtSec, day, 'grain',
+      ((12 + person.stats.strength / 6) * bonuses.farm * bonuses.rail) / CYCLES_PER_DAY.grain,
       () => settlement.field,
       () => { person.skills.farming = Math.min(100, person.skills.farming + 0.03); }, game);
+  } else if (t.kind === 'hunt') {
+    updateHunt(person, settlement, t, dtSec, game, bonuses.hunt);
+  } else if (t.kind === 'fish') {
+    t.workDuration = FISH_DURATION;
+    // Stand on the shore nearest the fish spot rather than walking into the
+    // water tile itself — the net/line reaches the rest of the way.
+    updateGather(person, settlement, t, dtSec, day, 'fish',
+      ((10 + person.stats.strength / 10) * bonuses.tools) / CYCLES_PER_DAY.fish,
+      () => {
+        const spot = game.world.fishSpots.find(x => x.id === t.fishId);
+        return spot ? nearestLandSpot(spot, game.terrain) : null;
+      }, null, game);
   } else if (t.kind === 'build') {
     updateBuild(person, settlement, t, dtSec);
   } else if (t.kind === 'idle') {
@@ -304,15 +330,19 @@ export function updateTask(person, settlement, dtSec, day, bonuses, game) {
 }
 
 export function updateAllTasks(game, dtSec) {
+  updateAnimals(game.world, game.terrain, dtSec);
   for (const s of game.settlements) {
+    const toolsBonus = 1 + Math.min(0.25, ((s.stock.tools || 0) / Math.max(1, s.peopleIds.length * 4)) * 0.25);
     const bonuses = {
-      farm: (s.buildings.some(b => b.type === 'farm') ? 1.3 : 1) * (s.buildings.some(b => b.type === 'hunterHut') ? 1.15 : 1),
-      wood: s.buildings.some(b => b.type === 'sawmill') ? 1.3 : 1,
+      farm: (s.buildings.some(b => b.type === 'farm') ? 1.3 : 1) * toolsBonus,
+      hunt: (s.buildings.some(b => b.type === 'hunterHut') ? 1.3 : 1) * toolsBonus,
+      wood: (s.buildings.some(b => b.type === 'sawmill') ? 1.3 : 1) * toolsBonus,
       mine: (s.buildings.some(b => b.type === 'forge') ? 1.25 : 1) *
         (s.buildings.some(b => b.type === 'factory') ? 1.3 : 1) *
-        (s.buildings.some(b => b.type === 'mine') ? 1.2 : 1),
+        (s.buildings.some(b => b.type === 'mine') ? 1.2 : 1) * toolsBonus,
       rail: s.buildings.some(b => b.type === 'railway') ? 1.1 : 1,
       refinery: s.buildings.some(b => b.type === 'refinery') ? 1.2 : 1,
+      tools: toolsBonus,
     };
     for (const id of s.peopleIds) {
       const p = game.people.get(id);
