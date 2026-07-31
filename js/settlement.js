@@ -4,6 +4,7 @@ import {
 } from './person.js';
 import { ageInYears } from './time.js';
 import { addEvent } from './events.js';
+import { nextBuildingSlot, regrowTrees } from './tasks.js';
 
 const HOUSING_TYPES = ['shack', 'hut', 'house', 'castle'];
 
@@ -24,6 +25,7 @@ export function createSettlement(opts) {
     era: 0,
     milestones: { firstTree: false },
     atWarWith: [],
+    trees: [], rocks: [], field: null,
   };
 }
 
@@ -50,7 +52,8 @@ function planNextBuilding(settlement, livingCount) {
   const info = BUILDING_INFO[target];
   for (const res in info.cost) if ((settlement.stock[res] || 0) < info.cost[res]) return false;
   for (const res in info.cost) settlement.stock[res] -= info.cost[res];
-  settlement.constructionQueue = { type: target, label: info.label, progress: 0, laborCost: info.laborCost };
+  const pos = nextBuildingSlot(settlement, settlement.buildings.length);
+  settlement.constructionQueue = { type: target, label: info.label, progress: 0, laborCost: info.laborCost, pos };
   return true;
 }
 
@@ -87,13 +90,14 @@ function assignJobs(settlement, adults) {
   }
 }
 
-export function tickSettlement(settlement, world, day) {
+export function tickSettlement(settlement, world, day, liveMode) {
   const people = settlement.peopleIds.map(id => world.people.get(id)).filter(Boolean);
   const living = people.filter(p => p.alive);
   if (living.length === 0) return;
   const adults = living.filter(p => isAdult(p, day));
 
   assignJobs(settlement, adults);
+  regrowTrees(settlement, day);
 
   const farmBonus = settlement.buildings.some(b => b.type === 'farm') ? 1.3 : 1;
   const mineBonus = (settlement.buildings.some(b => b.type === 'forge') ? 1.25 : 1) *
@@ -104,21 +108,25 @@ export function tickSettlement(settlement, world, day) {
   const refineryBonus = settlement.buildings.some(b => b.type === 'refinery') ? 1.2 : 1;
   const hasWell = settlement.buildings.some(b => b.type === 'well');
 
+  // In live mode, farmer/woodcutter/miner/builder output instead comes from the
+  // continuous walk-work-carry task loop (tasks.js) so it can be watched happening.
+  // During offline catch-up there's nothing to watch, so these formulas stand in
+  // for a whole day of that same work at once.
   for (const p of adults) {
-    if (p.job === 'farmer') {
+    if (p.job === 'farmer' && !liveMode) {
       settlement.stock.food += (12 + p.stats.strength / 6) * farmBonus * railBonus;
       p.skills.farming = Math.min(100, p.skills.farming + 0.03);
-    } else if (p.job === 'woodcutter') {
+    } else if (p.job === 'woodcutter' && !liveMode) {
       settlement.stock.wood += (5 + p.stats.strength / 12) * railBonus;
       p.skills.woodcutting = Math.min(100, p.skills.woodcutting + 0.03);
       if (!settlement.milestones.firstTree) {
         settlement.milestones.firstTree = true;
         addEvent(world.events, day, `${p.name} срубил${p.sex === 'f' ? 'а' : ''} первое дерево поселения «${settlement.name}».`, 'milestone');
       }
-    } else if (p.job === 'miner') {
+    } else if (p.job === 'miner' && !liveMode) {
       settlement.stock.stone += (4 + p.stats.strength / 14) * mineBonus * railBonus;
       if (settlement.era >= 5) settlement.stock.ore += (3 + p.stats.strength / 16) * mineBonus * refineryBonus;
-    } else if (p.job === 'builder' && settlement.constructionQueue) {
+    } else if (p.job === 'builder' && settlement.constructionQueue && !liveMode) {
       settlement.constructionQueue.progress += 1 + p.stats.strength / 20 + p.skills.building * 0.1;
       p.skills.building = Math.min(100, p.skills.building + 0.03);
     } else if (p.job === 'researcher') {
@@ -148,7 +156,7 @@ export function tickSettlement(settlement, world, day) {
 
   if (settlement.constructionQueue && settlement.constructionQueue.progress >= settlement.constructionQueue.laborCost) {
     const done = settlement.constructionQueue;
-    settlement.buildings.push({ type: done.type, builtDay: day });
+    settlement.buildings.push({ type: done.type, builtDay: day, x: done.pos.x, y: done.pos.y });
     settlement.constructionQueue = null;
     addEvent(world.events, day, `«${settlement.name}»: закончено строительство — ${done.label}.`, 'milestone');
   }
@@ -187,6 +195,7 @@ export function tickSettlement(settlement, world, day) {
         birthDay: day, settlementId: settlement.id,
         parents: [p.id, father ? father.id : null],
         stats: father ? mixStats(p.stats, father.stats) : p.stats,
+        pos: { x: settlement.x, y: settlement.y },
       });
       world.people.set(child.id, child);
       settlement.peopleIds.push(child.id);

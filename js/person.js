@@ -46,6 +46,8 @@ export function createPerson(opts) {
     job: null,
     settlementId: opts.settlementId ?? null,
     founder: !!opts.founder,
+    pos: opts.pos ? { x: opts.pos.x, y: opts.pos.y } : { x: 0, y: 0 },
+    task: null,
   };
   return p;
 }

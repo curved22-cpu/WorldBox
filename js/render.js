@@ -19,11 +19,11 @@ const JOB_COLOR = {
   farmer: '#e0c34c', woodcutter: '#8a5a34', miner: '#9aa0a6',
   builder: '#e08a3a', researcher: '#5aa0e0', soldier: '#d0453a',
 };
-const JOB_LABEL = {
+export const JOB_LABEL = {
   farmer: 'земледелец', woodcutter: 'дровосек', miner: 'горняк',
   builder: 'строитель', researcher: 'учёный', soldier: 'воин',
 };
-export { JOB_LABEL };
+const ERA_MATERIAL = ['#7c6a52', '#a97c50', '#8a8f96', '#7d8a63', '#5c6773', '#455060', '#3a3f47'];
 
 export class Camera {
   constructor(canvas) { this.canvas = canvas; this.x = 0; this.y = 0; this.zoom = 1; }
@@ -45,12 +45,6 @@ export class Camera {
   }
 }
 
-function personOffset(person) {
-  const ang = (person.id * 2.399963) % (Math.PI * 2);
-  const radius = 1.1 + (person.id % 5) * 0.55;
-  return [Math.cos(ang) * radius, Math.sin(ang) * radius];
-}
-
 export class Renderer {
   constructor(canvas, terrain) {
     this.canvas = canvas;
@@ -67,30 +61,85 @@ export class Renderer {
     }
   }
 
-  drawSettlement(ctx, s, selected) {
-    const px = s.x * TILE, py = s.y * TILE;
-    const era = s.era;
-    const size = 10 + era * 3;
-    ctx.fillStyle = '#6b4423';
-    ctx.fillRect(px - size / 2, py - size * 0.15, size, size * 0.7);
-    ctx.fillStyle = ['#7c6a52', '#a97c50', '#8a8f96', '#7d8a63', '#5c6773', '#455060', '#3a3f47'][era];
+  drawTree(ctx, x, y, alive) {
+    const px = x * TILE, py = y * TILE;
+    if (!alive) {
+      ctx.fillStyle = '#6b4423';
+      ctx.fillRect(px - 1.6, py - 1, 3.2, 2);
+      return;
+    }
+    ctx.fillStyle = '#5a3a22';
+    ctx.fillRect(px - 0.8, py - 1, 1.6, 3.5);
+    ctx.fillStyle = '#2f6b3c';
     ctx.beginPath();
-    ctx.moveTo(px - size / 2 - 2, py - size * 0.15);
-    ctx.lineTo(px, py - size * 0.15 - size * 0.7);
-    ctx.lineTo(px + size / 2 + 2, py - size * 0.15);
-    ctx.closePath();
+    ctx.arc(px, py - 2.5, 3.6, 0, Math.PI * 2);
     ctx.fill();
+  }
+
+  drawRock(ctx, x, y) {
+    const px = x * TILE, py = y * TILE;
+    ctx.fillStyle = '#9a9a9a';
+    ctx.beginPath();
+    ctx.arc(px, py, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#7d7d7d';
+    ctx.beginPath();
+    ctx.arc(px + 1.5, py + 1, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawField(ctx, field) {
+    if (!field) return;
+    const px = field.x * TILE, py = field.y * TILE;
+    ctx.fillStyle = 'rgba(224,195,76,0.35)';
+    ctx.beginPath();
+    ctx.arc(px, py, TILE * 1.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawStorageMarker(ctx, s, selected) {
+    const px = s.x * TILE, py = s.y * TILE;
+    ctx.fillStyle = '#caa15a';
+    ctx.beginPath();
+    ctx.arc(px, py, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#5a4020';
+    ctx.fillRect(px - 3, py - 6, 6, 3);
     if (selected) {
       ctx.strokeStyle = '#ffe37a';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(px, py, size * 0.9, 0, Math.PI * 2);
+      ctx.arc(px, py, 8, 0, Math.PI * 2);
       ctx.stroke();
     }
   }
 
+  drawBuildingAt(ctx, x, y, era) {
+    const px = x * TILE, py = y * TILE;
+    const size = 8 + era * 1.6;
+    ctx.fillStyle = ERA_MATERIAL[era];
+    ctx.fillRect(px - size / 2, py - size * 0.1, size, size * 0.65);
+    ctx.fillStyle = '#caa15a';
+    ctx.beginPath();
+    ctx.moveTo(px - size / 2 - 1.5, py - size * 0.1);
+    ctx.lineTo(px, py - size * 0.1 - size * 0.6);
+    ctx.lineTo(px + size / 2 + 1.5, py - size * 0.1);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  drawConstructionSite(ctx, queue) {
+    const px = queue.pos.x * TILE, py = queue.pos.y * TILE;
+    const pct = Math.max(0, Math.min(1, queue.progress / queue.laborCost));
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px - 5, py - 4, 10, 8);
+    ctx.fillStyle = '#caa15a';
+    ctx.fillRect(px - 5, py + 4 - 8 * pct, 10, 8 * pct);
+  }
+
   drawSettlementLabel(ctx, s, game) {
-    const px = s.x * TILE, py = s.y * TILE - (10 + s.era * 3) - 6;
+    const px = s.x * TILE, py = s.y * TILE - 16;
     const living = livingPeople(s, game).length;
     const text = `${s.name} · ${living}/${housingCap(s)} · ${ERAS[s.era].short}`;
     ctx.font = `${11 / this.camZoom}px sans-serif`;
@@ -102,18 +151,36 @@ export class Renderer {
     ctx.fillText(text, px, py);
   }
 
-  drawPerson(ctx, person, s, day, selected) {
-    const [ox, oy] = personOffset(person);
-    const px = (s.x + ox) * TILE, py = (s.y + oy) * TILE;
+  drawPerson(ctx, person, day, selected) {
+    const px = person.pos.x * TILE, py = person.pos.y * TILE;
     const adult = isAdult(person, day);
     const r = adult ? 3.2 : 2.1;
+    const t = person.task;
+    const working = t && (t.phase === 'working' || t.phase === 'building');
+    const bob = working ? Math.sin(performance.now() / 90) * 1.2 : 0;
+
+    if (t && t.carrying > 0) {
+      ctx.fillStyle = '#8a5a34';
+      ctx.fillRect(px - 2, py - r - 5, 4, 3);
+    }
     ctx.beginPath();
-    ctx.arc(px, py, r, 0, Math.PI * 2);
+    ctx.arc(px, py + bob * 0.2, r, 0, Math.PI * 2);
     ctx.fillStyle = person.job ? JOB_COLOR[person.job] : (person.sex === 'f' ? '#e0a8c0' : '#a8c0e0');
     ctx.fill();
     ctx.lineWidth = selected ? 1.6 : 0.8;
     ctx.strokeStyle = selected ? '#ffe37a' : 'rgba(0,0,0,0.5)';
     ctx.stroke();
+
+    if (working) {
+      const ang = Math.sin(performance.now() / 110) * 0.9;
+      ctx.strokeStyle = '#dddddd';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(px + r * 0.6, py);
+      ctx.lineTo(px + r * 0.6 + Math.cos(ang) * 4, py - 2 + Math.sin(ang) * 4);
+      ctx.stroke();
+    }
+
     if (person.needs.hunger < 25 || person.needs.health < 30) {
       ctx.fillStyle = 'rgba(255,60,60,0.9)';
       ctx.fillRect(px - 2.5, py - r - 4, 5, 1.4);
@@ -149,14 +216,22 @@ export class Renderer {
     if (sw > 0 && sh > 0) ctx.drawImage(this.terrainImg, sx, sy, sw, sh, dx, dy, sw * camera.zoom, sh * camera.zoom);
 
     camera.applyTransform(ctx);
+
+    for (const s of game.settlements) {
+      this.drawField(ctx, s.field);
+      for (const r of s.rocks) this.drawRock(ctx, r.x, r.y);
+      for (const t of s.trees) this.drawTree(ctx, t.x, t.y, t.alive);
+    }
     for (const s of game.settlements) {
       const selected = game.selected && game.selected.type === 'settlement' && game.selected.id === s.id;
-      this.drawSettlement(ctx, s, selected);
+      this.drawStorageMarker(ctx, s, selected);
+      for (const b of s.buildings) this.drawBuildingAt(ctx, b.x, b.y, s.era);
+      if (s.constructionQueue) this.drawConstructionSite(ctx, s.constructionQueue);
     }
     for (const s of game.settlements) {
       for (const p of livingPeople(s, game)) {
         const selected = game.selected && game.selected.type === 'person' && game.selected.id === p.id;
-        this.drawPerson(ctx, p, s, game.day, selected);
+        this.drawPerson(ctx, p, game.day, selected);
       }
     }
     for (const s of game.settlements) this.drawSettlementLabel(ctx, s, game);
@@ -168,8 +243,7 @@ export class Renderer {
     let best = null, bestD = 1.1;
     for (const s of game.settlements) {
       for (const p of livingPeople(s, game)) {
-        const [ox, oy] = personOffset(p);
-        const d = Math.hypot(wx - (s.x + ox), wy - (s.y + oy));
+        const d = Math.hypot(wx - p.pos.x, wy - p.pos.y);
         if (d < bestD) { bestD = d; best = { type: 'person', id: p.id }; }
       }
     }

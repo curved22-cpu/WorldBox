@@ -4,6 +4,7 @@ import { createSettlement, tickSettlement, livingPeople, housingCap } from './se
 import { createEventLog, addEvent } from './events.js';
 import { ERAS } from './eras.js';
 import { DAYS_PER_YEAR } from './time.js';
+import { initSites } from './tasks.js';
 
 export const WORLD_W = 220, WORLD_H = 140;
 
@@ -35,15 +36,17 @@ export function createGame(seed, settlementName, founder1, founder2) {
     selected: null,
   };
   const settlement = createSettlement({ name: settlementName || 'Первое поселение', x: spot.x, y: spot.y, foundedDay: 0 });
+  initSites(settlement, terrain);
+  const pos = { x: spot.x, y: spot.y };
   const p1 = createPerson({
     name: founder1.name, sex: founder1.sex, stats: founder1.stats,
     birthDay: -Math.round((founder1.age ?? 20) * DAYS_PER_YEAR),
-    settlementId: settlement.id, founder: true,
+    settlementId: settlement.id, founder: true, pos,
   });
   const p2 = createPerson({
     name: founder2.name, sex: founder2.sex, stats: founder2.stats,
     birthDay: -Math.round((founder2.age ?? 20) * DAYS_PER_YEAR),
-    settlementId: settlement.id, founder: true,
+    settlementId: settlement.id, founder: true, pos,
   });
   p1.partnerId = p2.id; p2.partnerId = p1.id;
   game.people.set(p1.id, p1);
@@ -113,10 +116,13 @@ function maybeColonize(game, settlement, day) {
   const group = shuffled.slice(0, 3 + Math.floor(Math.random() * 2));
   const spot = findLandSpot(game.terrain, { x: settlement.x, y: settlement.y });
   const newSettlement = createSettlement({ name: nextSettlementName(), x: spot.x, y: spot.y, foundedDay: day });
+  initSites(newSettlement, game.terrain);
   for (const p of group) {
     settlement.peopleIds = settlement.peopleIds.filter(id => id !== p.id);
     newSettlement.peopleIds.push(p.id);
     p.settlementId = newSettlement.id;
+    p.pos = { x: spot.x, y: spot.y };
+    p.task = null;
   }
   newSettlement.stock.food = 15;
   game.settlements.push(newSettlement);
@@ -125,8 +131,8 @@ function maybeColonize(game, settlement, day) {
     'major');
 }
 
-export function tickDay(game) {
-  for (const s of game.settlements) tickSettlement(s, game, game.day);
+export function tickDay(game, liveMode = false) {
+  for (const s of game.settlements) tickSettlement(s, game, game.day, liveMode);
   tickWars(game, game.day);
   for (const s of [...game.settlements]) maybeColonize(game, s, game.day);
   if (game.day % 20 === 0) {

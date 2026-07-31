@@ -6,6 +6,7 @@ import { Camera, Renderer, TILE } from './render.js';
 import { getTool } from './tools.js';
 import { MS_PER_DAY_AT_X1 } from './time.js';
 import { addEvent } from './events.js';
+import { updateAllTasks } from './tasks.js';
 
 const canvas = document.getElementById('game');
 function resize() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
@@ -47,9 +48,11 @@ function loop(now) {
   const dt = Math.min(now - last, 250);
   last = now;
   if (game.speedMult > 0) {
-    acc += dt * game.speedMult;
+    const simMs = dt * game.speedMult;
+    updateAllTasks(game, simMs / 1000);
+    acc += simMs;
     let days = 0;
-    while (acc >= MS_PER_DAY_AT_X1 && days < 80) { tickDay(game); acc -= MS_PER_DAY_AT_X1; days++; }
+    while (acc >= MS_PER_DAY_AT_X1 && days < 80) { tickDay(game, true); acc -= MS_PER_DAY_AT_X1; days++; }
   } else {
     acc = 0;
   }
