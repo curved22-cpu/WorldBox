@@ -163,6 +163,23 @@ export function updateAnimals(world, terrain, dtSec) {
 
 export function tickWildlife(world, terrain, day) {
   if (world.animals.length >= MAX_ANIMALS) return;
+  // Hunted-out regions still get new arrivals migrating in from the wilds —
+  // otherwise a kind hunted to zero locally would never come back, since
+  // reproduction alone only spawns near animals that already exist.
+  if (world.animals.length < 6 && Math.random() < 0.08) {
+    const kinds = Object.keys(ANIMAL_KINDS);
+    for (let tries = 0; tries < 20; tries++) {
+      const x = 1 + Math.floor(Math.random() * (terrain.width - 2));
+      const y = 1 + Math.floor(Math.random() * (terrain.height - 2));
+      const b = terrain.biome[terrain.idx(x, y)];
+      if (b !== Biome.FOREST && b !== Biome.GRASS) continue;
+      world.animals.push({
+        id: world.nextAnimalId++, kind: kinds[Math.floor(Math.random() * kinds.length)],
+        x, y, homeX: x, homeY: y, wanderTx: x, wanderTy: y, wanderTimer: Math.random() * 4,
+      });
+      break;
+    }
+  }
   for (const a of [...world.animals]) {
     if (Math.random() > 0.01) continue;
     if (world.animals.length >= MAX_ANIMALS) break;

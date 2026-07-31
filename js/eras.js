@@ -50,6 +50,33 @@ export function eraForSettlement(knowledge, population) {
 
 export const HOUSING_TYPES = ['shack', 'hut', 'house', 'castle'];
 
+// Storage is finite: goods (wood/stone/ore/tools/clothes) are capped by how
+// much 'storage' the settlement has built, food (grain/flour/bread/meat/fish)
+// by 'granary' (plus a little from storage too). Both can be built more than
+// once — each extra one raises the ceiling instead of sitting unused.
+export const MAX_STORAGE_BUILDINGS = 3;
+export const GOODS_KEYS = ['wood', 'stone', 'ore', 'tools', 'clothes'];
+export const FOOD_KEYS = ['grain', 'flour', 'bread', 'meat', 'fish'];
+
+export function storageCapacity(settlement) {
+  const storageCount = settlement.buildings.filter(b => b.type === 'storage').length;
+  const granaryCount = settlement.buildings.filter(b => b.type === 'granary').length;
+  return {
+    goods: 60 + storageCount * 110,
+    food: 60 + granaryCount * 110 + storageCount * 40,
+  };
+}
+
+export function capFor(settlement, key) {
+  const cap = storageCapacity(settlement);
+  return GOODS_KEYS.includes(key) ? cap.goods : cap.food;
+}
+
+export const RESOURCE_LABEL = {
+  wood: 'дерево', stone: 'камень', ore: 'руда', tools: 'инструменты', clothes: 'одежда',
+  grain: 'зерно', flour: 'мука', bread: 'хлеб', meat: 'мясо', fish: 'рыба', knowledge: 'знания',
+};
+
 export const BUILDING_INFO = {
   shack: { label: 'Шалаш', cost: { wood: 6 }, laborCost: 4, cap: 2, icon: '⛺' },
   hut: { label: 'Хижина', cost: { wood: 14 }, laborCost: 8, cap: 4, icon: '🛖' },
@@ -83,13 +110,13 @@ export const BUILDING_INFO = {
 export const BUILDING_DESC = {
   shack: 'Первое временное жильё поселенцев.',
   hut: 'Более крепкое жильё для растущей семьи.',
-  storage: 'Здесь хранятся все запасы поселения.',
+  storage: 'Хранит запасы дерева, камня, руды, инструментов и одежды. Можно построить ещё, если склад переполнен.',
   house: 'Просторный дом на несколько семей.',
   farm: 'Повышает урожай земледельцев на 30%.',
   well: 'Чистая вода замедляет голод жителей.',
   hunterHut: 'Охотники приносят дополнительную еду из леса.',
   sawmill: 'Ускоряет заготовку дерева и позволяет дровосекам сажать новые деревья.',
-  granary: 'Умелое хранение снижает потребление еды жителями.',
+  granary: 'Хранит больше еды и снижает её потребление жителями. Можно построить ещё, если переполнен.',
   dock: 'Открывает промысел рыбаков и дальние морские переселения.',
   mill: 'Перемалывает зерно в муку.',
   bakery: 'Печёт хлеб из муки — сытнее, чем сырое зерно.',

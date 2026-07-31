@@ -102,6 +102,47 @@ export class Renderer {
     ctx.fill();
   }
 
+  drawPath(ctx, x0, y0, x1, y1) {
+    ctx.strokeStyle = 'rgba(133,109,74,0.55)';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x0 * TILE, y0 * TILE);
+    ctx.lineTo(x1 * TILE, y1 * TILE);
+    ctx.stroke();
+  }
+
+  drawDecor(ctx, x, y, type) {
+    const px = x * TILE, py = y * TILE;
+    if (type === 'flower') {
+      ctx.fillStyle = ['#e0a8c0', '#f0d060', '#c0a8f0'][Math.floor((x * 7 + y * 3) % 3)];
+      ctx.beginPath();
+      ctx.arc(px, py, 0.9, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (type === 'tuft') {
+      ctx.strokeStyle = '#3f7a45';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(px - 1, py + 0.8); ctx.lineTo(px - 0.4, py - 1);
+      ctx.moveTo(px, py + 0.8); ctx.lineTo(px, py - 1.2);
+      ctx.moveTo(px + 1, py + 0.8); ctx.lineTo(px + 0.4, py - 1);
+      ctx.stroke();
+    } else if (type === 'pebble') {
+      ctx.fillStyle = '#8f8f8f';
+      ctx.beginPath();
+      ctx.arc(px, py, 0.8, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (type === 'fence') {
+      ctx.strokeStyle = '#8a6a42';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(px - 1.6, py); ctx.lineTo(px + 1.6, py);
+      ctx.moveTo(px - 1.1, py - 1.4); ctx.lineTo(px - 1.1, py + 1);
+      ctx.moveTo(px + 1.1, py - 1.4); ctx.lineTo(px + 1.1, py + 1);
+      ctx.stroke();
+    }
+  }
+
   drawFishSpot(ctx, x, y) {
     const px = x * TILE, py = y * TILE;
     const t = performance.now() / 700;
@@ -262,6 +303,13 @@ export class Renderer {
     const minY = Math.min(vy0, vy1) - 3, maxY = Math.max(vy0, vy1) + 3;
     const inView = o => o.x >= minX && o.x <= maxX && o.y >= minY && o.y <= maxY;
 
+    for (const s of game.settlements) {
+      if (!inView(s)) continue;
+      for (const b of s.buildings) this.drawPath(ctx, s.x, s.y, b.x, b.y);
+      if (s.constructionQueue) this.drawPath(ctx, s.x, s.y, s.constructionQueue.pos.x, s.constructionQueue.pos.y);
+      if (s.field) this.drawPath(ctx, s.x, s.y, s.field.x, s.field.y);
+      for (const d of s.decor) this.drawDecor(ctx, s.x + d.dx, s.y + d.dy, d.type);
+    }
     for (const s of game.settlements) this.drawField(ctx, s.field);
     for (const r of game.world.rocks) if (inView(r)) this.drawRock(ctx, r.x, r.y);
     for (const t of game.world.trees) if (inView(t)) this.drawTree(ctx, t.x, t.y, t.stage);

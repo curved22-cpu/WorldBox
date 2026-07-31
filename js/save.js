@@ -8,7 +8,7 @@ const SAVE_KEY = 'worldbox_saga_save_v1';
 // Bump whenever the save shape changes incompatibly (new required fields on
 // settlement/person, etc.) so an old save is discarded instead of crashing
 // the game on load.
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 
 export function serializeGame(game) {
   return {

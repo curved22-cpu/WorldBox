@@ -1,4 +1,7 @@
-import { ERAS, BUILDING_INFO, eraForSettlement, HOUSING_TYPES } from './eras.js';
+import {
+  ERAS, BUILDING_INFO, eraForSettlement, HOUSING_TYPES,
+  storageCapacity, capFor, GOODS_KEYS, FOOD_KEYS, RESOURCE_LABEL, MAX_STORAGE_BUILDINGS,
+} from './eras.js';
 import {
   isAdult, dailyDecay, applyFood, updateHealthAndMood, checkDeath, killPerson, mixStats, createPerson,
 } from './person.js';
@@ -10,6 +13,24 @@ import { isCoastal } from './resources.js';
 let nextSettlementId = 1;
 export function getNextSettlementId() { return nextSettlementId; }
 export function setNextSettlementId(n) { nextSettlementId = n; }
+
+const DECOR_TYPES = ['flower', 'tuft', 'pebble', 'fence'];
+
+// A handful of purely cosmetic props scattered near the settlement centre —
+// generated once at founding so the village doesn't look like bare buildings
+// floating on grass.
+function generateDecor() {
+  const decor = [];
+  const n = 6 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, r = 1.5 + Math.random() * 6;
+    decor.push({
+      dx: Math.cos(a) * r, dy: Math.sin(a) * r,
+      type: DECOR_TYPES[Math.floor(Math.random() * DECOR_TYPES.length)],
+    });
+  }
+  return decor;
+}
 
 export function createSettlement(opts) {
   return {
@@ -29,7 +50,18 @@ export function createSettlement(opts) {
     milestones: { firstTree: false },
     atWarWith: [],
     field: null,
+    stockFullWarned: {},
+    decor: generateDecor(),
   };
+}
+
+// Adds to a stock resource, clamped at the settlement's current storage
+// capacity — production beyond that ceiling is simply lost (spoiled/spilled)
+// until more storage/granary gets built.
+export function addStock(settlement, key, amount) {
+  if (amount <= 0) return;
+  const cap = capFor(settlement, key);
+  settlement.stock[key] = Math.min(cap, (settlement.stock[key] || 0) + amount);
 }
 
 export function housingCap(settlement) {
@@ -60,7 +92,7 @@ function assignHousing(settlement, living) {
   }
 }
 
-function planNextBuilding(settlement, livingCount, terrain) {
+function planNextBuilding(settlement, livingCount, terrain, day) {
   if (settlement.constructionQueue) return false;
   const unlocked = [];
   for (let i = 0; i <= settlement.era; i++) unlocked.push(...ERAS[i].buildings);
@@ -71,31 +103,66 @@ function planNextBuilding(settlement, livingCount, terrain) {
     const housing = unlocked.filter(t => HOUSING_TYPES.includes(t));
     target = housing[housing.length - 1];
   } else {
-    const nonHousing = unlocked.filter(t => !HOUSING_TYPES.includes(t) && (t !== 'dock' || coastal));
-    target = nonHousing.find(t => !settlement.buildings.some(b => b.type === t));
+    const storeCap = storageCapacity(settlement);
+    const storageCount = settlement.buildings.filter(b => b.type === 'storage').length;
+    const granaryCount = settlement.buildings.filter(b => b.type === 'granary').length;
+    const goodsFull = GOODS_KEYS.some(k => settlement.stock[k] >= storeCap.goods * 0.92);
+    const foodFull = FOOD_KEYS.some(k => settlement.stock[k] >= storeCap.food * 0.92);
+    const nonHousing = unlocked.filter(t => !HOUSING_TYPES.includes(t) && (t !== 'dock' || coastal) &&
+      t !== 'storage' && t !== 'granary');
+    if (goodsFull && storageCount < MAX_STORAGE_BUILDINGS && unlocked.includes('storage')) {
+      target = 'storage';
+    } else if (foodFull && granaryCount < MAX_STORAGE_BUILDINGS && unlocked.includes('granary')) {
+      target = 'granary';
+    } else {
+      target = nonHousing.find(t => !settlement.buildings.some(b => b.type === t));
+      if (!target && storageCount < MAX_STORAGE_BUILDINGS && unlocked.includes('storage')) target = 'storage';
+      else if (!target && granaryCount < MAX_STORAGE_BUILDINGS && unlocked.includes('granary')) target = 'granary';
+    }
   }
   if (!target) return false;
   const info = BUILDING_INFO[target];
   for (const res in info.cost) if ((settlement.stock[res] || 0) < info.cost[res]) return false;
   for (const res in info.cost) settlement.stock[res] -= info.cost[res];
   const pos = nearestLandSpot(nextBuildingSlot(settlement, settlement.buildings.length), terrain);
-  settlement.constructionQueue = { type: target, label: info.label, progress: 0, laborCost: info.laborCost, pos };
+  settlement.constructionQueue = { type: target, label: info.label, progress: 0, laborCost: info.laborCost, pos, queuedDay: day };
   return true;
 }
 
-function assignJobs(settlement, adults) {
-  const needWood = settlement.stock.wood < adults.length * 4;
-  const needMineral = settlement.era >= 2 && settlement.stock.stone < adults.length * 3;
+function rotated(arr, n) {
+  const k = ((n % arr.length) + arr.length) % arr.length;
+  return arr.slice(k).concat(arr.slice(0, k));
+}
+
+function assignJobs(settlement, adults, day) {
+  // Gather jobs pause once their resource is nearly full instead of piling
+  // up stock nobody needs — freed hands drop to the next active role below.
+  const storeCap = storageCapacity(settlement);
+  const notFull = (key, capKey) => (settlement.stock[key] || 0) < (capKey === 'goods' ? storeCap.goods : storeCap.food) * 0.9;
+  const needWood = notFull('wood', 'goods');
+  const needMineral = settlement.era >= 2 && notFull('stone', 'goods');
+  const needGrain = notFull('grain', 'food');
+  const needMeat = notFull('meat', 'food');
+  const needFish = notFull('fish', 'food');
   const hasHunterHut = settlement.buildings.some(b => b.type === 'hunterHut');
   const hasDock = settlement.buildings.some(b => b.type === 'dock');
-  const targets = [
-    ['farmer', Math.max(1, Math.ceil(adults.length / 5)), 'strength'],
-    ['hunter', hasHunterHut ? Math.max(1, Math.ceil(adults.length / 7)) : 0, 'strength'],
-    ['fisherman', hasDock ? Math.max(1, Math.ceil(adults.length / 7)) : 0, 'strength'],
+  // Farming always comes first and soldiering always last, but everything in
+  // between (building, research, materials, hunting/fishing) rotates day to
+  // day — with only 2-3 adults there aren't enough hands to keep every role
+  // fed with a fixed priority order, and a fixed order means whichever role
+  // loses the tie-break starves *forever*. Rotating means each role gets a
+  // fair turn every few days instead of never.
+  const middle = [
     ['builder', settlement.constructionQueue ? Math.min(3, Math.max(1, Math.ceil(adults.length / 6))) : 0, 'strength'],
+    ['researcher', adults.length >= 2 ? Math.min(3, Math.floor(adults.length / 6) + 1) : 0, 'intelligence'],
     ['woodcutter', needWood ? Math.max(1, Math.ceil(adults.length / 8)) : 0, 'strength'],
     ['miner', needMineral ? Math.max(1, Math.ceil(adults.length / 9)) : 0, 'strength'],
-    ['researcher', adults.length >= 2 ? Math.min(3, Math.floor(adults.length / 6) + 1) : 0, 'intelligence'],
+    ['hunter', (hasHunterHut && needMeat) ? Math.max(1, Math.ceil(adults.length / 7)) : 0, 'strength'],
+    ['fisherman', (hasDock && needFish) ? Math.max(1, Math.ceil(adults.length / 7)) : 0, 'strength'],
+  ];
+  const targets = [
+    ['farmer', needGrain ? Math.max(1, Math.ceil(adults.length / 5)) : 0, 'strength'],
+    ...rotated(middle, day),
     ['soldier', settlement.era >= 3 ? Math.min(Math.floor(adults.length / 4), settlement.atWarWith.length ? 6 : 1) : 0, 'strength'],
   ];
   const validJobs = new Set(targets.filter(t => t[1] > 0).map(t => t[0]));
@@ -130,7 +197,7 @@ export function tickSettlement(settlement, world, day, liveMode) {
   if (living.length === 0) return;
   const adults = living.filter(p => isAdult(p, day));
 
-  assignJobs(settlement, adults);
+  assignJobs(settlement, adults, day);
   assignHousing(settlement, living);
 
   const farmBonus = settlement.buildings.some(b => b.type === 'farm') ? 1.3 : 1;
@@ -163,23 +230,23 @@ export function tickSettlement(settlement, world, day, liveMode) {
   // these formulas stand in for a whole day of that same work at once.
   for (const p of adults) {
     if (p.job === 'farmer' && !liveMode) {
-      settlement.stock.grain += (12 + p.stats.strength / 6) * farmBonus * railBonus * toolsBonus;
+      addStock(settlement, 'grain', (12 + p.stats.strength / 6) * farmBonus * railBonus * toolsBonus);
       p.skills.farming = Math.min(100, p.skills.farming + 0.03);
     } else if (p.job === 'hunter' && !liveMode) {
-      settlement.stock.meat += (9 + p.stats.strength / 10) * huntBonus * toolsBonus;
+      addStock(settlement, 'meat', (9 + p.stats.strength / 10) * huntBonus * toolsBonus);
       p.skills.combat = Math.min(100, p.skills.combat + 0.02);
     } else if (p.job === 'fisherman' && !liveMode) {
-      settlement.stock.fish += (8 + p.stats.strength / 10) * toolsBonus;
+      addStock(settlement, 'fish', (8 + p.stats.strength / 10) * toolsBonus);
     } else if (p.job === 'woodcutter' && !liveMode) {
-      settlement.stock.wood += (5 + p.stats.strength / 12) * woodBonus * railBonus * toolsBonus;
+      addStock(settlement, 'wood', (5 + p.stats.strength / 12) * woodBonus * railBonus * toolsBonus);
       p.skills.woodcutting = Math.min(100, p.skills.woodcutting + 0.03);
       if (!settlement.milestones.firstTree) {
         settlement.milestones.firstTree = true;
         addEvent(world.events, day, `${p.name} срубил${p.sex === 'f' ? 'а' : ''} первое дерево поселения «${settlement.name}».`, 'milestone');
       }
     } else if (p.job === 'miner' && !liveMode) {
-      settlement.stock.stone += (4 + p.stats.strength / 14) * mineBonus * railBonus * toolsBonus;
-      if (settlement.era >= 5) settlement.stock.ore += (3 + p.stats.strength / 16) * mineBonus * refineryBonus * toolsBonus;
+      addStock(settlement, 'stone', (4 + p.stats.strength / 14) * mineBonus * railBonus * toolsBonus);
+      if (settlement.era >= 5) addStock(settlement, 'ore', (3 + p.stats.strength / 16) * mineBonus * refineryBonus * toolsBonus);
     } else if (p.job === 'builder' && settlement.constructionQueue && !liveMode) {
       settlement.constructionQueue.progress += 1 + p.stats.strength / 20 + p.skills.building * 0.1;
       p.skills.building = Math.min(100, p.skills.building + 0.03);
@@ -190,18 +257,18 @@ export function tickSettlement(settlement, world, day, liveMode) {
       p.skills.combat = Math.min(100, p.skills.combat + 0.03);
     }
   }
-  if (settlement.buildings.some(b => b.type === 'market')) settlement.stock.bread += 1;
+  if (settlement.buildings.some(b => b.type === 'market')) addStock(settlement, 'bread', 1);
 
   // Production chain: grain -> flour (mill) -> bread (bakery).
   if (hasMill) {
     const conv = Math.min(settlement.stock.grain, 8 + living.length * 0.6);
     settlement.stock.grain -= conv;
-    settlement.stock.flour += conv * 0.9;
+    addStock(settlement, 'flour', conv * 0.9);
   }
   if (hasBakery) {
     const conv = Math.min(settlement.stock.flour, 8 + living.length * 0.6);
     settlement.stock.flour -= conv;
-    settlement.stock.bread += conv * 0.95;
+    addStock(settlement, 'bread', conv * 0.95);
   }
   // Crafting chain: wood+stone -> tools, wood+meat(hides) -> clothes.
   if (hasWorkshop) {
@@ -210,13 +277,23 @@ export function tickSettlement(settlement, world, day, liveMode) {
     if (toolUnits > 0) {
       settlement.stock.wood -= toolUnits * 2;
       settlement.stock.stone -= toolUnits * 1.5;
-      settlement.stock.tools += toolUnits;
+      addStock(settlement, 'tools', toolUnits);
     }
     const clothUnits = Math.max(0, Math.min(craftCap, settlement.stock.wood, settlement.stock.meat / 3));
     if (clothUnits > 0) {
       settlement.stock.wood -= clothUnits;
       settlement.stock.meat -= clothUnits * 3;
-      settlement.stock.clothes += clothUnits;
+      addStock(settlement, 'clothes', clothUnits);
+    }
+  }
+
+  for (const key of GOODS_KEYS.concat(FOOD_KEYS)) {
+    const full = settlement.stock[key] >= capFor(settlement, key) * 0.98;
+    if (full && !settlement.stockFullWarned[key]) {
+      settlement.stockFullWarned[key] = true;
+      addEvent(world.events, day, `«${settlement.name}»: склад забит под завязку (${RESOURCE_LABEL[key]}) — нужно больше места для хранения.`, 'normal');
+    } else if (!full && settlement.stockFullWarned[key]) {
+      settlement.stockFullWarned[key] = false;
     }
   }
 
@@ -261,8 +338,15 @@ export function tickSettlement(settlement, world, day, liveMode) {
     settlement.constructionQueue = null;
     addEvent(world.events, day, `«${settlement.name}»: закончено строительство — ${done.label}.`, 'milestone');
   }
+  // Safety valve: a build nobody's had free hands for in a very long time
+  // would otherwise sit at 0% forever and permanently block anything else
+  // from ever being queued — abandon it (no refund) and let it retry fresh.
+  if (settlement.constructionQueue && day - settlement.constructionQueue.queuedDay > 200) {
+    addEvent(world.events, day, `«${settlement.name}»: стройка «${settlement.constructionQueue.label}» заброшена — не хватало рабочих рук.`, 'normal');
+    settlement.constructionQueue = null;
+  }
   if (!settlement.constructionQueue) {
-    const started = planNextBuilding(settlement, living.length, world.terrain);
+    const started = planNextBuilding(settlement, living.length, world.terrain, day);
     if (started) {
       addEvent(world.events, day, `«${settlement.name}»: заложена стройка — ${settlement.constructionQueue.label}.`, 'normal');
     }

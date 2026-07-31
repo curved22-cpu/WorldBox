@@ -1,6 +1,7 @@
 import { Biome, isLand } from './terrain.js';
 import { addEvent } from './events.js';
 import { ANIMAL_KINDS, findPlantSpot, updateAnimals } from './resources.js';
+import { capFor } from './eras.js';
 
 export const WALK_SPEED = 2.4; // tiles per sim-second
 const CHOP_DURATION = 2.5;
@@ -128,6 +129,18 @@ function nearestFishSpot(game, from, terrain) {
   return nearestReachable(game.world.fishSpots, from, terrain, 60);
 }
 
+function makeIdleTask(settlement, terrain) {
+  const spot = nearestLandSpot({
+    x: settlement.x + (Math.random() * 2 - 1) * 3,
+    y: settlement.y + (Math.random() * 2 - 1) * 3,
+  }, terrain);
+  return { kind: 'idle', phase: 'wander', tx: spot.x, ty: spot.y, timer: 1 + Math.random() * 3 };
+}
+
+// Always leaves person.task set to something with somewhere to walk — a job
+// with no reachable/needed resource right now falls back to idle wandering
+// instead of leaving the task null, which used to freeze people in place
+// wherever they last stood (usually right at the storage).
 function assignTask(person, settlement, game) {
   const terrain = game.terrain;
   const job = person.job;
@@ -139,27 +152,23 @@ function assignTask(person, settlement, game) {
     }
     const hasSawmill = settlement.buildings.some(b => b.type === 'sawmill');
     const spot = hasSawmill ? findPlantSpot(game.world, terrain, person.pos) : null;
-    person.task = spot ? { kind: 'plant', phase: 'toSite', tx: spot.x, ty: spot.y, timer: 0 } : null;
+    person.task = spot ? { kind: 'plant', phase: 'toSite', tx: spot.x, ty: spot.y, timer: 0 } : makeIdleTask(settlement, terrain);
   } else if (job === 'miner') {
     const rock = nearestRock(game, person.pos, terrain);
     const wantOre = settlement.era >= 5 && Math.random() < 0.4;
-    person.task = rock ? { kind: wantOre ? 'ore' : 'stone', phase: 'toSite', rockId: rock.id, timer: 0, carrying: 0 } : null;
+    person.task = rock ? { kind: wantOre ? 'ore' : 'stone', phase: 'toSite', rockId: rock.id, timer: 0, carrying: 0 } : makeIdleTask(settlement, terrain);
   } else if (job === 'farmer') {
     person.task = { kind: 'grain', phase: 'toSite', timer: 0, carrying: 0 };
   } else if (job === 'hunter') {
     const animal = nearestAnimal(game, person.pos, terrain);
-    person.task = animal ? { kind: 'hunt', phase: 'toSite', animalId: animal.id, tx: animal.x, ty: animal.y, timer: 0, carrying: 0 } : null;
+    person.task = animal ? { kind: 'hunt', phase: 'toSite', animalId: animal.id, tx: animal.x, ty: animal.y, timer: 0, carrying: 0 } : makeIdleTask(settlement, terrain);
   } else if (job === 'fisherman') {
     const spot = nearestFishSpot(game, person.pos, terrain);
-    person.task = spot ? { kind: 'fish', phase: 'toSite', fishId: spot.id, timer: 0, carrying: 0 } : null;
+    person.task = spot ? { kind: 'fish', phase: 'toSite', fishId: spot.id, timer: 0, carrying: 0 } : makeIdleTask(settlement, terrain);
   } else if (job === 'builder') {
-    person.task = settlement.constructionQueue ? { kind: 'build', phase: 'toStorage', timer: 0, carrying: 0 } : null;
+    person.task = settlement.constructionQueue ? { kind: 'build', phase: 'toStorage', timer: 0, carrying: 0 } : makeIdleTask(settlement, terrain);
   } else {
-    const spot = nearestLandSpot({
-      x: settlement.x + (Math.random() * 2 - 1) * 3,
-      y: settlement.y + (Math.random() * 2 - 1) * 3,
-    }, terrain);
-    person.task = { kind: 'idle', phase: 'wander', tx: spot.x, ty: spot.y, timer: 1 + Math.random() * 3 };
+    person.task = makeIdleTask(settlement, terrain);
   }
 }
 
@@ -182,7 +191,8 @@ function updateGather(person, settlement, t, dtSec, day, resKey, yieldPerCycle, 
   } else if (t.phase === 'depositing') {
     t.timer -= dtSec;
     if (t.timer <= 0) {
-      settlement.stock[resKey] = (settlement.stock[resKey] || 0) + t.carrying;
+      const cap = capFor(settlement, resKey);
+      settlement.stock[resKey] = Math.min(cap, (settlement.stock[resKey] || 0) + t.carrying);
       t.carrying = 0;
       person.task = null;
     }
@@ -212,7 +222,10 @@ function updateHunt(person, settlement, t, dtSec, game, huntBonus) {
   } else if (t.phase === 'depositing') {
     t.timer -= dtSec;
     if (t.timer <= 0) {
-      if (t.carrying > 0) settlement.stock.meat = (settlement.stock.meat || 0) + t.carrying;
+      if (t.carrying > 0) {
+        const cap = capFor(settlement, 'meat');
+        settlement.stock.meat = Math.min(cap, (settlement.stock.meat || 0) + t.carrying);
+      }
       t.carrying = 0;
       person.task = null;
     }
@@ -253,27 +266,36 @@ function updatePlant(person, settlement, t, dtSec, day, game) {
   }
 }
 
-function updateIdle(person, settlement, t, dtSec, terrain) {
+// While idling (no reachable/needed work right now), retry the real job
+// each time the wander leg finishes rather than every single frame — cheap,
+// and means someone freed up by a full granary starts farming again the
+// moment there's room, without visibly twitching in place meanwhile.
+function updateIdle(person, settlement, t, dtSec, game) {
   t.timer -= dtSec;
   const arrived = moveToward(person, t.tx, t.ty, dtSec);
   if (arrived || t.timer <= 0) {
+    if (person.job) {
+      assignTask(person, settlement, game);
+      if (person.task.kind !== 'idle') return;
+    }
     const spot = nearestLandSpot({
       x: settlement.x + (Math.random() * 2 - 1) * 3,
       y: settlement.y + (Math.random() * 2 - 1) * 3,
-    }, terrain);
+    }, game.terrain);
     t.tx = spot.x; t.ty = spot.y;
     t.timer = 1 + Math.random() * 3;
   }
 }
 
 function jobMatchesTask(job, taskKind) {
+  if (taskKind === 'idle') return true;
   if (job === 'woodcutter') return taskKind === 'wood' || taskKind === 'plant';
   if (job === 'miner') return taskKind === 'stone' || taskKind === 'ore';
   if (job === 'farmer') return taskKind === 'grain';
   if (job === 'hunter') return taskKind === 'hunt';
   if (job === 'fisherman') return taskKind === 'fish';
   if (job === 'builder') return taskKind === 'build';
-  return taskKind === 'idle';
+  return false;
 }
 
 export function updateTask(person, settlement, dtSec, day, bonuses, game) {
@@ -325,7 +347,7 @@ export function updateTask(person, settlement, dtSec, day, bonuses, game) {
   } else if (t.kind === 'build') {
     updateBuild(person, settlement, t, dtSec);
   } else if (t.kind === 'idle') {
-    updateIdle(person, settlement, t, dtSec, game.terrain);
+    updateIdle(person, settlement, t, dtSec, game);
   }
 }
 
