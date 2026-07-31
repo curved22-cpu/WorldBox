@@ -1,12 +1,10 @@
-import { ERAS, BUILDING_INFO, eraForSettlement } from './eras.js';
+import { ERAS, BUILDING_INFO, eraForSettlement, HOUSING_TYPES } from './eras.js';
 import {
   isAdult, dailyDecay, applyFood, updateHealthAndMood, checkDeath, killPerson, mixStats, createPerson,
 } from './person.js';
 import { ageInYears } from './time.js';
 import { addEvent } from './events.js';
-import { nextBuildingSlot, regrowTrees, nearestLandSpot } from './tasks.js';
-
-const HOUSING_TYPES = ['shack', 'hut', 'house', 'castle'];
+import { nextBuildingSlot, growTrees, maybeSpawnTree, nearestLandSpot } from './tasks.js';
 
 let nextSettlementId = 1;
 export function getNextSettlementId() { return nextSettlementId; }
@@ -33,6 +31,28 @@ export function housingCap(settlement) {
   let cap = 2;
   for (const b of settlement.buildings) if (HOUSING_TYPES.includes(b.type)) cap += BUILDING_INFO[b.type].cap;
   return cap;
+}
+
+function assignHousing(settlement, living) {
+  const housingIdx = [];
+  for (let i = 0; i < settlement.buildings.length; i++) {
+    const b = settlement.buildings[i];
+    if (HOUSING_TYPES.includes(b.type)) { b.residents.length = 0; housingIdx.push(i); }
+  }
+  for (const p of living) {
+    if (p.homeIndex != null && housingIdx.includes(p.homeIndex)) {
+      const b = settlement.buildings[p.homeIndex];
+      if (b.residents.length < BUILDING_INFO[b.type].cap) { b.residents.push(p.id); continue; }
+    }
+    p.homeIndex = null;
+  }
+  for (const p of living) {
+    if (p.homeIndex != null) continue;
+    for (const i of housingIdx) {
+      const b = settlement.buildings[i];
+      if (b.residents.length < BUILDING_INFO[b.type].cap) { b.residents.push(p.id); p.homeIndex = i; break; }
+    }
+  }
 }
 
 function planNextBuilding(settlement, livingCount, terrain) {
@@ -97,16 +117,24 @@ export function tickSettlement(settlement, world, day, liveMode) {
   const adults = living.filter(p => isAdult(p, day));
 
   assignJobs(settlement, adults);
-  regrowTrees(settlement, day);
+  growTrees(settlement, day);
+  maybeSpawnTree(settlement, world.terrain, day);
+  assignHousing(settlement, living);
 
-  const farmBonus = settlement.buildings.some(b => b.type === 'farm') ? 1.3 : 1;
+  const farmBonus = (settlement.buildings.some(b => b.type === 'farm') ? 1.3 : 1) *
+    (settlement.buildings.some(b => b.type === 'hunterHut') ? 1.15 : 1);
+  const woodBonus = settlement.buildings.some(b => b.type === 'sawmill') ? 1.3 : 1;
   const mineBonus = (settlement.buildings.some(b => b.type === 'forge') ? 1.25 : 1) *
     (settlement.buildings.some(b => b.type === 'factory') ? 1.3 : 1) *
     (settlement.buildings.some(b => b.type === 'mine') ? 1.2 : 1);
-  const labBonus = settlement.buildings.some(b => b.type === 'laboratory') ? 1.4 : 1;
+  const labBonus = (settlement.buildings.some(b => b.type === 'laboratory') ? 1.4 : 1) *
+    (settlement.buildings.some(b => b.type === 'library') ? 1.3 : 1) *
+    (settlement.buildings.some(b => b.type === 'school') ? 1.3 : 1);
   const railBonus = settlement.buildings.some(b => b.type === 'railway') ? 1.1 : 1;
   const refineryBonus = settlement.buildings.some(b => b.type === 'refinery') ? 1.2 : 1;
   const hasWell = settlement.buildings.some(b => b.type === 'well');
+  const hasGranary = settlement.buildings.some(b => b.type === 'granary');
+  const hasChurch = settlement.buildings.some(b => b.type === 'church');
 
   // In live mode, farmer/woodcutter/miner/builder output instead comes from the
   // continuous walk-work-carry task loop (tasks.js) so it can be watched happening.
@@ -117,7 +145,7 @@ export function tickSettlement(settlement, world, day, liveMode) {
       settlement.stock.food += (12 + p.stats.strength / 6) * farmBonus * railBonus;
       p.skills.farming = Math.min(100, p.skills.farming + 0.03);
     } else if (p.job === 'woodcutter' && !liveMode) {
-      settlement.stock.wood += (5 + p.stats.strength / 12) * railBonus;
+      settlement.stock.wood += (5 + p.stats.strength / 12) * woodBonus * railBonus;
       p.skills.woodcutting = Math.min(100, p.skills.woodcutting + 0.03);
       if (!settlement.milestones.firstTree) {
         settlement.milestones.firstTree = true;
@@ -138,7 +166,7 @@ export function tickSettlement(settlement, world, day, liveMode) {
   }
   if (settlement.buildings.some(b => b.type === 'market')) settlement.stock.food += 1;
 
-  const FOOD_PER_PERSON = 5;
+  const FOOD_PER_PERSON = hasGranary ? 4 : 5;
   const needed = living.length * FOOD_PER_PERSON;
   if (settlement.stock.food >= needed) {
     settlement.stock.food -= needed;
@@ -152,11 +180,14 @@ export function tickSettlement(settlement, world, day, liveMode) {
     dailyDecay(p);
     if (hasWell) p.needs.hunger = Math.min(100, p.needs.hunger + 1);
     updateHealthAndMood(p);
+    if (hasChurch) p.needs.mood = Math.min(100, p.needs.mood + 1.5);
   }
 
   if (settlement.constructionQueue && settlement.constructionQueue.progress >= settlement.constructionQueue.laborCost) {
     const done = settlement.constructionQueue;
-    settlement.buildings.push({ type: done.type, builtDay: day, x: done.pos.x, y: done.pos.y });
+    const newBuilding = { type: done.type, builtDay: day, x: done.pos.x, y: done.pos.y };
+    if (HOUSING_TYPES.includes(done.type)) newBuilding.residents = [];
+    settlement.buildings.push(newBuilding);
     settlement.constructionQueue = null;
     addEvent(world.events, day, `«${settlement.name}»: закончено строительство — ${done.label}.`, 'milestone');
   }

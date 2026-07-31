@@ -123,6 +123,7 @@ function maybeColonize(game, settlement, day) {
     p.settlementId = newSettlement.id;
     p.pos = { x: spot.x, y: spot.y };
     p.task = null;
+    p.homeIndex = null;
   }
   newSettlement.stock.food = 15;
   game.settlements.push(newSettlement);

@@ -1,5 +1,5 @@
 import { Biome } from './terrain.js';
-import { ERAS } from './eras.js';
+import { ERAS, BUILDING_INFO } from './eras.js';
 import { isAdult } from './person.js';
 import { livingPeople, housingCap } from './settlement.js';
 
@@ -23,7 +23,6 @@ export const JOB_LABEL = {
   farmer: 'земледелец', woodcutter: 'дровосек', miner: 'горняк',
   builder: 'строитель', researcher: 'учёный', soldier: 'воин',
 };
-const ERA_MATERIAL = ['#7c6a52', '#a97c50', '#8a8f96', '#7d8a63', '#5c6773', '#455060', '#3a3f47'];
 
 export class Camera {
   constructor(canvas) { this.canvas = canvas; this.x = 0; this.y = 0; this.zoom = 1; }
@@ -61,18 +60,32 @@ export class Renderer {
     }
   }
 
-  drawTree(ctx, x, y, alive) {
+  drawTree(ctx, x, y, stage) {
     const px = x * TILE, py = y * TILE;
-    if (!alive) {
-      ctx.fillStyle = '#6b4423';
-      ctx.fillRect(px - 1.6, py - 1, 3.2, 2);
+    const sway = Math.sin(performance.now() / 900 + x * 3.1 + y * 1.7) * 0.5;
+    if (stage <= 0) {
+      ctx.strokeStyle = '#3f7a45';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(px, py + 0.6);
+      ctx.lineTo(px + sway * 0.3, py - 1.2);
+      ctx.stroke();
       return;
     }
+    if (stage === 1) {
+      ctx.fillStyle = '#39633e';
+      ctx.beginPath();
+      ctx.arc(px + sway * 0.2, py - 0.6, 1.9, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    const trunkH = stage === 2 ? 2.4 : 3.5;
+    const crownR = stage === 2 ? 2.6 : 3.6;
     ctx.fillStyle = '#5a3a22';
-    ctx.fillRect(px - 0.8, py - 1, 1.6, 3.5);
+    ctx.fillRect(px - 0.8, py - 1, 1.6, trunkH);
     ctx.fillStyle = '#2f6b3c';
     ctx.beginPath();
-    ctx.arc(px, py - 2.5, 3.6, 0, Math.PI * 2);
+    ctx.arc(px + sway, py - 1 - crownR * 0.6, crownR, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -114,18 +127,24 @@ export class Renderer {
     }
   }
 
-  drawBuildingAt(ctx, x, y, era) {
-    const px = x * TILE, py = y * TILE;
-    const size = 8 + era * 1.6;
-    ctx.fillStyle = ERA_MATERIAL[era];
-    ctx.fillRect(px - size / 2, py - size * 0.1, size, size * 0.65);
-    ctx.fillStyle = '#caa15a';
+  drawBuildingAt(ctx, b, era, selected) {
+    const px = b.x * TILE, py = b.y * TILE;
+    const info = BUILDING_INFO[b.type];
     ctx.beginPath();
-    ctx.moveTo(px - size / 2 - 1.5, py - size * 0.1);
-    ctx.lineTo(px, py - size * 0.1 - size * 0.6);
-    ctx.lineTo(px + size / 2 + 1.5, py - size * 0.1);
-    ctx.closePath();
+    ctx.ellipse(px, py + 1.5, 5.5, 2.2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.fill();
+    ctx.font = '11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(info ? info.icon : '🏚️', px, py);
+    if (selected) {
+      ctx.strokeStyle = '#ffe37a';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(px, py, 7.5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   drawConstructionSite(ctx, queue) {
@@ -220,12 +239,16 @@ export class Renderer {
     for (const s of game.settlements) {
       this.drawField(ctx, s.field);
       for (const r of s.rocks) this.drawRock(ctx, r.x, r.y);
-      for (const t of s.trees) this.drawTree(ctx, t.x, t.y, t.alive);
+      for (const t of s.trees) this.drawTree(ctx, t.x, t.y, t.stage);
     }
     for (const s of game.settlements) {
-      const selected = game.selected && game.selected.type === 'settlement' && game.selected.id === s.id;
-      this.drawStorageMarker(ctx, s, selected);
-      for (const b of s.buildings) this.drawBuildingAt(ctx, b.x, b.y, s.era);
+      const selectedSettlement = game.selected && game.selected.type === 'settlement' && game.selected.id === s.id;
+      this.drawStorageMarker(ctx, s, selectedSettlement);
+      for (let i = 0; i < s.buildings.length; i++) {
+        const selectedBuilding = game.selected && game.selected.type === 'building' &&
+          game.selected.settlementId === s.id && game.selected.index === i;
+        this.drawBuildingAt(ctx, s.buildings[i], s.era, selectedBuilding);
+      }
       if (s.constructionQueue) this.drawConstructionSite(ctx, s.constructionQueue);
     }
     for (const s of game.settlements) {
@@ -248,6 +271,22 @@ export class Renderer {
       }
     }
     if (best) return best;
+
+    let bestB = null, bestBD = 0.8;
+    for (const s of game.settlements) {
+      for (let i = 0; i < s.buildings.length; i++) {
+        const b = s.buildings[i];
+        const d = Math.hypot(wx - b.x, wy - b.y);
+        if (d < bestBD) { bestBD = d; bestB = { type: 'building', settlementId: s.id, index: i }; }
+      }
+      if (s.constructionQueue) {
+        const q = s.constructionQueue;
+        const d = Math.hypot(wx - q.pos.x, wy - q.pos.y);
+        if (d < bestBD) { bestBD = d; bestB = { type: 'building', settlementId: s.id, index: -1 }; }
+      }
+    }
+    if (bestB) return bestB;
+
     let bestS = null, bestSD = 2.2;
     for (const s of game.settlements) {
       const d = Math.hypot(wx - s.x, wy - s.y);

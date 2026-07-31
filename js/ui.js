@@ -1,5 +1,5 @@
 import { STAT_KEYS, STAT_LABEL, randomStat, randomName } from './person.js';
-import { ERAS, BUILDING_INFO } from './eras.js';
+import { ERAS, BUILDING_INFO, BUILDING_DESC, HOUSING_TYPES } from './eras.js';
 import { SPEEDS, dayToYear, ageInYears } from './time.js';
 import { TOOLS } from './tools.js';
 import { livingPeople, housingCap } from './settlement.js';
@@ -177,7 +177,8 @@ export function setupGameUI(game, onToolApply, onNewGame) {
         <span>📚 ${Math.floor(s.stock.knowledge)}</span>
       </div>
       <h3>Постройки</h3>
-      <div class="buildings-list">${s.buildings.length ? s.buildings.map(b => BUILDING_INFO[b.type].label).join(', ') : '<em>нет</em>'}
+      <div class="buildings-list">${s.buildings.length ? s.buildings.map((b, i) =>
+        `<a data-selbuild="${i}">${BUILDING_INFO[b.type].icon} ${BUILDING_INFO[b.type].label}</a>`).join(', ') : '<em>нет</em>'}
         ${s.constructionQueue ? `<br/>Строится: ${s.constructionQueue.label} (${Math.floor(s.constructionQueue.progress)}/${s.constructionQueue.laborCost})` : ''}</div>
       <h3>Жители</h3>
       <div class="people-list">${living.map(p =>
@@ -192,7 +193,58 @@ export function setupGameUI(game, onToolApply, onNewGame) {
       const [type, id] = a.dataset.sel.split(':');
       selectTarget({ type, id: parseInt(id, 10) });
     }));
+    inspector.querySelectorAll('[data-selbuild]').forEach(a => a.addEventListener('click', () =>
+      selectTarget({ type: 'building', settlementId: s.id, index: parseInt(a.dataset.selbuild, 10) })));
     inspector.querySelectorAll('.power-btn').forEach(b => b.addEventListener('click', () => onToolApply(b.dataset.tool, s)));
+  }
+
+  function renderBuildingInspector(settlementId, index) {
+    const s = game.settlements.find(x => x.id === settlementId);
+    if (!s) { selectTarget(null); return; }
+    if (index === -1) {
+      const q = s.constructionQueue;
+      if (!q) { selectTarget(null); return; }
+      const info = BUILDING_INFO[q.type];
+      inspector.innerHTML = `
+        <button class="close-btn" id="insp-close">✕</button>
+        <h2>${info.icon} ${q.label}</h2>
+        <div class="insp-sub">Стройка в поселении «${s.name}»</div>
+        <div class="bar-row"><span class="bar-label">Готовность</span>
+          <div class="bar-track"><div class="bar-fill" style="width:${Math.min(100, q.progress / q.laborCost * 100)}%"></div></div>
+          <span class="bar-val">${Math.floor(q.progress)}/${q.laborCost}</span></div>
+      `;
+      inspector.style.display = 'block';
+      inspector.querySelector('#insp-close').addEventListener('click', () => selectTarget(null));
+      return;
+    }
+    const b = s.buildings[index];
+    if (!b) { selectTarget(null); return; }
+    const info = BUILDING_INFO[b.type];
+    const isHousing = HOUSING_TYPES.includes(b.type);
+    const residents = isHousing ? (b.residents || []).map(id => game.people.get(id)).filter(Boolean) : [];
+    inspector.innerHTML = `
+      <button class="close-btn" id="insp-close">✕</button>
+      <h2>${info.icon} ${info.label}</h2>
+      <div class="insp-sub">Поселение «${s.name}» · построено в ${dayToYear(b.builtDay)} г.</div>
+      <p class="insp-desc">${BUILDING_DESC[b.type] || ''}</p>
+      ${b.type === 'storage' ? `
+        <h3>Запасы поселения</h3>
+        <div class="stock-grid">
+          <span>🪵 ${Math.floor(s.stock.wood)}</span><span>🍎 ${Math.floor(s.stock.food)}</span>
+          <span>🪨 ${Math.floor(s.stock.stone)}</span><span>⚙️ ${Math.floor(s.stock.ore)}</span>
+          <span>📚 ${Math.floor(s.stock.knowledge)}</span>
+        </div>` : ''}
+      ${isHousing ? `
+        <h3>Жители (${residents.length}/${info.cap})</h3>
+        <div class="people-list">${residents.length ? residents.map(p => `<a data-sel="person:${p.id}">${p.name}</a>`).join(', ') : '<em>пусто</em>'}</div>
+      ` : ''}
+    `;
+    inspector.style.display = 'block';
+    inspector.querySelector('#insp-close').addEventListener('click', () => selectTarget(null));
+    inspector.querySelectorAll('[data-sel]').forEach(a => a.addEventListener('click', () => {
+      const [type, id] = a.dataset.sel.split(':');
+      selectTarget({ type, id: parseInt(id, 10) });
+    }));
   }
 
   function selectTarget(hit) {
@@ -201,6 +253,8 @@ export function setupGameUI(game, onToolApply, onNewGame) {
     if (hit.type === 'person') {
       const p = game.people.get(hit.id);
       if (p) renderPersonInspector(p); else selectTarget(null);
+    } else if (hit.type === 'building') {
+      renderBuildingInspector(hit.settlementId, hit.index);
     } else {
       const s = game.settlements.find(x => x.id === hit.id);
       if (s) renderSettlementInspector(s); else selectTarget(null);
@@ -220,6 +274,8 @@ export function setupGameUI(game, onToolApply, onNewGame) {
       if (game.selected.type === 'person') {
         const p = game.people.get(game.selected.id);
         if (p) renderPersonInspector(p);
+      } else if (game.selected.type === 'building') {
+        renderBuildingInspector(game.selected.settlementId, game.selected.index);
       } else {
         const s = game.settlements.find(x => x.id === game.selected.id);
         if (s) renderSettlementInspector(s);

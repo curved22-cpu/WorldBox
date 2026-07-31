@@ -48,6 +48,7 @@ export function createPerson(opts) {
     founder: !!opts.founder,
     pos: opts.pos ? { x: opts.pos.x, y: opts.pos.y } : { x: 0, y: 0 },
     task: null,
+    homeIndex: null,
   };
   return p;
 }
