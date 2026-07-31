@@ -4,7 +4,7 @@ import {
 } from './person.js';
 import { ageInYears } from './time.js';
 import { addEvent } from './events.js';
-import { nextBuildingSlot, regrowTrees } from './tasks.js';
+import { nextBuildingSlot, regrowTrees, nearestLandSpot } from './tasks.js';
 
 const HOUSING_TYPES = ['shack', 'hut', 'house', 'castle'];
 
@@ -35,7 +35,7 @@ export function housingCap(settlement) {
   return cap;
 }
 
-function planNextBuilding(settlement, livingCount) {
+function planNextBuilding(settlement, livingCount, terrain) {
   if (settlement.constructionQueue) return false;
   const unlocked = [];
   for (let i = 0; i <= settlement.era; i++) unlocked.push(...ERAS[i].buildings);
@@ -52,7 +52,7 @@ function planNextBuilding(settlement, livingCount) {
   const info = BUILDING_INFO[target];
   for (const res in info.cost) if ((settlement.stock[res] || 0) < info.cost[res]) return false;
   for (const res in info.cost) settlement.stock[res] -= info.cost[res];
-  const pos = nextBuildingSlot(settlement, settlement.buildings.length);
+  const pos = nearestLandSpot(nextBuildingSlot(settlement, settlement.buildings.length), terrain);
   settlement.constructionQueue = { type: target, label: info.label, progress: 0, laborCost: info.laborCost, pos };
   return true;
 }
@@ -161,7 +161,7 @@ export function tickSettlement(settlement, world, day, liveMode) {
     addEvent(world.events, day, `«${settlement.name}»: закончено строительство — ${done.label}.`, 'milestone');
   }
   if (!settlement.constructionQueue) {
-    const started = planNextBuilding(settlement, living.length);
+    const started = planNextBuilding(settlement, living.length, world.terrain);
     if (started) {
       addEvent(world.events, day, `«${settlement.name}»: заложена стройка — ${settlement.constructionQueue.label}.`, 'normal');
     }

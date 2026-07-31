@@ -1,4 +1,4 @@
-import { Biome } from './terrain.js';
+import { Biome, isLand } from './terrain.js';
 import { addEvent } from './events.js';
 
 export const WALK_SPEED = 2.4; // tiles per sim-second
@@ -26,12 +26,14 @@ export function initSites(settlement, terrain) {
     const spot = scatterSpot(settlement, terrain, 5, 18, [Biome.ROCK, Biome.SAND, Biome.GRASS]);
     settlement.rocks.push({ id: i, x: spot.x, y: spot.y });
   }
-  const ang = Math.random() * Math.PI * 2;
-  settlement.field = { x: settlement.x + Math.cos(ang) * 3.5, y: settlement.y + Math.sin(ang) * 3.5 };
+  settlement.field = scatterSpot(settlement, terrain, 2.5, 5, [Biome.GRASS]);
 }
 
+// Always returns a tile on land — first choice is one of the preferred
+// biomes, then any land tile in range, then the settlement's own tile
+// (which findLandSpot already guaranteed is land when it was founded).
 function scatterSpot(settlement, terrain, minR, maxR, preferredBiomes) {
-  for (let tries = 0; tries < 20; tries++) {
+  for (let tries = 0; tries < 30; tries++) {
     const a = Math.random() * Math.PI * 2;
     const r = minR + Math.random() * (maxR - minR);
     const x = Math.round(settlement.x + Math.cos(a) * r);
@@ -39,9 +41,29 @@ function scatterSpot(settlement, terrain, minR, maxR, preferredBiomes) {
     if (x < 1 || y < 1 || x >= terrain.width - 1 || y >= terrain.height - 1) continue;
     if (preferredBiomes.includes(terrain.biome[terrain.idx(x, y)])) return { x, y };
   }
-  const a = Math.random() * Math.PI * 2;
-  const r = minR + Math.random() * (maxR - minR);
-  return { x: settlement.x + Math.cos(a) * r, y: settlement.y + Math.sin(a) * r };
+  for (let tries = 0; tries < 60; tries++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = minR + Math.random() * (maxR - minR);
+    const x = Math.round(settlement.x + Math.cos(a) * r);
+    const y = Math.round(settlement.y + Math.sin(a) * r);
+    if (x < 1 || y < 1 || x >= terrain.width - 1 || y >= terrain.height - 1) continue;
+    if (isLand(terrain.biome[terrain.idx(x, y)])) return { x, y };
+  }
+  return { x: settlement.x, y: settlement.y };
+}
+
+export function nearestLandSpot(pos, terrain) {
+  const x0 = Math.round(pos.x), y0 = Math.round(pos.y);
+  if (x0 >= 0 && y0 >= 0 && x0 < terrain.width && y0 < terrain.height &&
+    isLand(terrain.biome[terrain.idx(x0, y0)])) return pos;
+  for (let r = 1; r <= 6; r++) {
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) {
+      const x = Math.round(pos.x + Math.cos(a) * r), y = Math.round(pos.y + Math.sin(a) * r);
+      if (x < 1 || y < 1 || x >= terrain.width - 1 || y >= terrain.height - 1) continue;
+      if (isLand(terrain.biome[terrain.idx(x, y)])) return { x, y };
+    }
+  }
+  return pos;
 }
 
 export function nextBuildingSlot(settlement, index) {
@@ -67,32 +89,46 @@ function moveToward(person, tx, ty, dtSec) {
   return false;
 }
 
-function nearestTree(settlement, from) {
-  let best = null, bestD = Infinity;
-  for (const t of settlement.trees) {
-    if (!t.alive) continue;
-    const d = (t.x - from.x) ** 2 + (t.y - from.y) ** 2;
-    if (d < bestD) { bestD = d; best = t; }
+// A tile path is "walkable" if a straight line to it never dips into water —
+// used to avoid sending someone to a resource across a bay or inlet, which
+// would otherwise look like they're walking on water.
+function pathIsClear(terrain, x0, y0, x1, y1) {
+  const steps = 16;
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = Math.round(x0 + (x1 - x0) * t), y = Math.round(y0 + (y1 - y0) * t);
+    if (x < 0 || y < 0 || x >= terrain.width || y >= terrain.height) continue;
+    if (!isLand(terrain.biome[terrain.idx(x, y)])) return false;
   }
-  return best;
+  return true;
 }
 
-function nearestRock(settlement, from) {
+function nearestReachable(list, from, terrain) {
   let best = null, bestD = Infinity;
-  for (const r of settlement.rocks) {
-    const d = (r.x - from.x) ** 2 + (r.y - from.y) ** 2;
-    if (d < bestD) { bestD = d; best = r; }
+  let fallback = null, fallbackD = Infinity;
+  for (const item of list) {
+    const d = (item.x - from.x) ** 2 + (item.y - from.y) ** 2;
+    if (d < fallbackD) { fallbackD = d; fallback = item; }
+    if (d < bestD && pathIsClear(terrain, from.x, from.y, item.x, item.y)) { bestD = d; best = item; }
   }
-  return best;
+  return best || fallback;
 }
 
-function assignTask(person, settlement) {
+function nearestTree(settlement, from, terrain) {
+  return nearestReachable(settlement.trees.filter(t => t.alive), from, terrain);
+}
+
+function nearestRock(settlement, from, terrain) {
+  return nearestReachable(settlement.rocks, from, terrain);
+}
+
+function assignTask(person, settlement, terrain) {
   const job = person.job;
   if (job === 'woodcutter') {
-    const tree = nearestTree(settlement, person.pos);
+    const tree = nearestTree(settlement, person.pos, terrain);
     person.task = tree ? { kind: 'wood', phase: 'toSite', treeId: tree.id, timer: 0, carrying: 0 } : null;
   } else if (job === 'miner') {
-    const rock = nearestRock(settlement, person.pos);
+    const rock = nearestRock(settlement, person.pos, terrain);
     const wantOre = settlement.era >= 5 && Math.random() < 0.4;
     person.task = rock ? { kind: wantOre ? 'ore' : 'stone', phase: 'toSite', rockId: rock.id, timer: 0, carrying: 0 } : null;
   } else if (job === 'farmer') {
@@ -177,7 +213,7 @@ function jobMatchesTask(job, taskKind) {
 }
 
 export function updateTask(person, settlement, dtSec, day, bonuses, game) {
-  if (!person.task || !jobMatchesTask(person.job, person.task.kind)) assignTask(person, settlement);
+  if (!person.task || !jobMatchesTask(person.job, person.task.kind)) assignTask(person, settlement, game.terrain);
   const t = person.task;
   if (!t) return;
 
