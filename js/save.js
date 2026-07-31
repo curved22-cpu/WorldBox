@@ -5,9 +5,14 @@ import { tickDay, WORLD_W, WORLD_H, getNameIdx, setNameIdx } from './sim.js';
 import { MS_PER_DAY_AT_X1, MAX_CATCHUP_DAYS } from './time.js';
 
 const SAVE_KEY = 'worldbox_saga_save_v1';
+// Bump whenever the save shape changes incompatibly (new required fields on
+// settlement/person, etc.) so an old save is discarded instead of crashing
+// the game on load.
+const SAVE_VERSION = 2;
 
 export function serializeGame(game) {
   return {
+    version: SAVE_VERSION,
     day: game.day,
     seed: game.seed,
     liveWithoutMe: game.liveWithoutMe,
@@ -42,6 +47,7 @@ export function loadGame() {
   if (!raw) return null;
   let data;
   try { data = JSON.parse(raw); } catch { return null; }
+  if (data.version !== SAVE_VERSION) { clearSave(); return null; }
   const terrain = generateTerrain(WORLD_W, WORLD_H, data.seed);
   setNextPersonId(data.nextPersonId || 1);
   setNextSettlementId(data.nextSettlementId || 1);

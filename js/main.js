@@ -61,18 +61,39 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-if (hasSave()) {
-  game = loadGame();
-  const daysPassed = catchUp(game);
-  if (daysPassed > 5) {
-    addEvent(game.events, game.day, `Пока тебя не было, прошло примерно ${Math.round(daysPassed / 100)} лет.`, 'major');
-  }
-  saveGame(game);
-  startLoop();
-} else {
-  setupOnboarding((settlementName, f1, f2) => {
-    game = createGame(Math.floor(Math.random() * 1e9), settlementName, f1, f2);
+function boot() {
+  const loaded = hasSave() ? loadGame() : null;
+  if (loaded) {
+    game = loaded;
+    const daysPassed = catchUp(game);
+    if (daysPassed > 5) {
+      addEvent(game.events, game.day, `Пока тебя не было, прошло примерно ${Math.round(daysPassed / 100)} лет.`, 'major');
+    }
     saveGame(game);
     startLoop();
-  });
+  } else {
+    setupOnboarding((settlementName, f1, f2) => {
+      game = createGame(Math.floor(Math.random() * 1e9), settlementName, f1, f2);
+      saveGame(game);
+      startLoop();
+    });
+  }
+}
+
+try {
+  boot();
+} catch (err) {
+  // An incompatible or corrupted save must never leave a blank screen —
+  // wipe it and start a fresh saga instead.
+  console.error('Failed to resume saved game, starting fresh:', err);
+  clearSave();
+  try {
+    setupOnboarding((settlementName, f1, f2) => {
+      game = createGame(Math.floor(Math.random() * 1e9), settlementName, f1, f2);
+      saveGame(game);
+      startLoop();
+    });
+  } catch (err2) {
+    console.error('Fatal error setting up onboarding:', err2);
+  }
 }
